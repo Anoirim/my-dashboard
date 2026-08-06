@@ -186,6 +186,7 @@
         <div class="hint">해외 주식용. 무료 키: <a href="https://finnhub.io/register" target="_blank">finnhub.io/register</a>. 키는 이 브라우저에만 저장됩니다.</div>
       </div>
       <div id="stockResult" style="display:none">
+        <div id="stockName" style="font-size:18px;font-weight:700;margin-bottom:4px"></div>
         <div class="stock-head">
           <div class="price" id="stockPrice">-</div>
           <div class="chg" id="stockChg">-</div>
@@ -651,10 +652,11 @@ async function loadStockKR(){
     const d=await fetch(KIS_PROXY+"?symbol="+sym).then(r=>r.json());
     if(d.error){msg.textContent="오류: "+d.error;$("stockResult").style.display="none";return;}
     const up=d.diff>=0;
+    $("stockName").textContent=`${d.name} (${sym})`;
     $("stockPrice").textContent=d.price.toLocaleString("ko-KR")+"원";
     $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
     $("stockChg").className="chg "+(up?"up":"down");
-    $("stockMeta").textContent=`${d.name} · 고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`;
+    $("stockMeta").textContent=`고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`;
     $("stockResult").style.display="block";msg.textContent="";
     drawSimpleKR(d);
     renderEasyKR(d,up);
@@ -706,6 +708,7 @@ async function loadStockUS(){
     if(q.c===0&&q.pc===0){msg.textContent="데이터가 없습니다. 종목 코드를 확인하세요.";$("stockResult").style.display="none";return;}
     const chg=q.c-q.pc, pct=(chg/q.pc*100);
     const up=chg>=0;
+    $("stockName").textContent=sym;
     $("stockPrice").textContent="$"+q.c.toFixed(2);
     $("stockChg").textContent=(up?"▲ +":"▼ ")+chg.toFixed(2)+" ("+pct.toFixed(2)+"%)";
     $("stockChg").className="chg "+(up?"up":"down");

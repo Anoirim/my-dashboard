@@ -2,7 +2,11 @@
 // 환경변수 필요: KIS_APPKEY, KIS_APPSECRET  (실전투자 기준)
 // 호출 예: /api/kis?symbol=005930
 
-const BASE = "https://openapi.koreainvestment.com:9443"; // 실전 (모의투자는 https://openapivts.koreainvestment.com:29443)
+// KIS_ENV 환경변수로 실전/모의 전환 (mock 또는 vts 로 설정하면 모의투자 서버 사용)
+const IS_MOCK = /^(mock|vts|모의)$/i.test(process.env.KIS_ENV || "");
+const BASE = IS_MOCK
+  ? "https://openapivts.koreainvestment.com:29443" // 모의투자
+  : "https://openapi.koreainvestment.com:9443";    // 실전
 
 // 접근토큰 캐시 (같은 인스턴스가 살아있는 동안 재사용 → KIS 재발급 제한 회피)
 let tokenCache = { token: null, exp: 0 };
