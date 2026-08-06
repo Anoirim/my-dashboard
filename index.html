@@ -664,7 +664,8 @@ async function loadStockKR(silent){
     const d=await fetch(KIS_PROXY+"?symbol="+sym).then(r=>r.json());
     if(d.error){msg.textContent="오류: "+d.error;return;}
     const up=d.diff>=0;
-    $("stockName").textContent=`${d.name} (${sym})`;
+    // 이름이 코드와 같으면(현재가 API가 이름 미제공) 코드만 표시 → 잠시 후 일별시세에서 실제 이름으로 교체
+    $("stockName").textContent=(d.name&&d.name!==sym)?`${d.name} (${sym})`:sym;
     $("stockPrice").textContent=d.price.toLocaleString("ko-KR")+"원";
     $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
     $("stockChg").className="chg "+(up?"up":"down");
@@ -677,7 +678,9 @@ async function loadStockKR(silent){
         lastFinanceKR=(fj&&!fj.error)?fj:null;}catch(e){lastFinanceKR=null;}
       renderEasyKR(d,up);
       try{const dj=await fetch(KIS_PROXY+"?action=daily&symbol="+sym).then(r=>r.json());
-        if(dj.candles&&dj.candles.length>1)drawDailyKR(dj.candles,d.name);else drawSimpleKR(d);
+        const nm=dj.name||d.name; // 일별시세가 종목명을 확실히 줌
+        if(nm)$("stockName").textContent=`${nm} (${sym})`;
+        if(dj.candles&&dj.candles.length>1)drawDailyKR(dj.candles,nm);else drawSimpleKR(d);
       }catch(e){drawSimpleKR(d);}
     }else{
       renderEasyKR(d,up); // 실시간: 헤더·해석만 갱신, 차트는 유지

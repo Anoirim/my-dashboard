@@ -73,11 +73,12 @@ async function getDaily(symbol) {
     "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
   const j = await (await fetch(url, { headers: headers(token, "FHKST03010100") })).json();
   const arr = j.output2 || [];
+  const name = (j.output1 && (j.output1.hts_kor_isnm || j.output1.prdt_name)) || null; // 종목명
   const candles = arr
     .filter((x) => x.stck_bsop_date && x.stck_clpr)
     .map((x) => ({ date: x.stck_bsop_date, close: num(x.stck_clpr), vol: num(x.acml_vol) }))
     .sort((a, b) => a.date.localeCompare(b.date)); // 과거→최근
-  return { candles };
+  return { name, candles };
 }
 
 async function getFinance(symbol) {
