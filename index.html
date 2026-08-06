@@ -221,7 +221,10 @@
 
       <div class="exp-divider"></div>
 
-      <div class="exp-label">🔁 정기지출 항목 (결제일 · 결제수단)</div>
+      <div class="exp-label" style="display:flex;justify-content:space-between;align-items:center">
+        <span>🔁 정기지출 항목 (결제일 · 결제수단)</span>
+        <span>합계 <b id="fixedTotalTop" style="color:var(--accent);font-size:16px">0원</b></span>
+      </div>
       <div class="row" style="margin-bottom:10px">
         <input type="number" id="fxDay" min="1" max="31" placeholder="결제일" style="width:80px">
         <input type="text" id="fxName" placeholder="항목명 (예: 넷플릭스, 통신비)" style="flex:1">
@@ -549,19 +552,22 @@ function renderExpAll(){
   // 요약 (체크된 카드만 합산, 중복 방지)
   const cardTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>s+c.bill,0);
   $("cardTotalTop").textContent=wonKR(cardTotal);
+  $("fixedTotalTop").textContent=wonKR(fixed.reduce((s,f)=>s+f.amt,0)); // 모든 정기지출 합계
+  const checkedNames=new Set(cards.filter(c=>c.inc!==false).map(c=>c.name));
+  // 카드정기지출: 체크된 카드로 결제되는 정기지출
+  const cardFixed=fixed.filter(f=>checkedNames.has(f.method)).reduce((s,f)=>s+f.amt,0);
+  // 기타(카드 비정기): 체크된 카드 청구액 - 카드정기지출
+  const cardEtc=cardTotal-cardFixed;
+  // 카드외 정기지출
   const nonCardFixed=fixed.filter(f=>f.method==="계좌/현금").reduce((s,f)=>s+f.amt,0);
-  const fixedTotal=fixed.reduce((s,f)=>s+f.amt,0);
-  // 기타(비정기): 체크된 카드 청구액 중 정기지출로 잡히지 않은 나머지
-  const cardEtcTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>{
-    const inc=fixed.filter(f=>f.method===c.name).reduce((a,f)=>a+f.amt,0);
-    return s+(c.bill-inc);
-  },0);
+  // 정기지출 합계 = 카드정기 + 카드외정기
+  const fixedTotal=cardFixed+nonCardFixed;
   $("expSum").innerHTML=`
     <div class="exp-box"><div class="lbl">카드 청구액(체크분)</div><div class="num">${wonKR(cardTotal)}</div></div>
-    <div class="exp-box"><div class="lbl">정기지출 합계</div><div class="num">${wonKR(fixedTotal)}</div></div>
-    <div class="exp-box"><div class="lbl">기타(비정기)</div><div class="num">${wonKR(cardEtcTotal)}</div></div>
-    <div class="exp-box"><div class="lbl">카드 외 정기지출</div><div class="num">${wonKR(nonCardFixed)}</div></div>
-    <div class="exp-box total"><div class="lbl">${curMonth} 월 총지출</div><div class="num">${wonKR(cardTotal+nonCardFixed)}</div></div>`;
+    <div class="exp-box"><div class="lbl">카드정기지출</div><div class="num">${wonKR(cardFixed)}</div></div>
+    <div class="exp-box"><div class="lbl">기타(카드 비정기)</div><div class="num">${wonKR(cardEtc)}</div></div>
+    <div class="exp-box"><div class="lbl">카드외 정기지출</div><div class="num">${wonKR(nonCardFixed)}</div></div>
+    <div class="exp-box total"><div class="lbl">정기지출 합계</div><div class="num">${wonKR(fixedTotal)}</div></div>`;
 }
 $("cardBill").addEventListener("keydown",e=>{if(e.key==="Enter")addCard();});
 $("fxAmt").addEventListener("keydown",e=>{if(e.key==="Enter")addFixed();});
