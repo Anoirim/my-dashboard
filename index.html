@@ -565,11 +565,12 @@ function renderExpAll(){
   // 정기지출 섹션 상단: 합계 + 카드정기/카드외정기 세부
   $("fixedTotalTop").textContent=wonKR(fixedTotal);
   $("fixedBreakdown").textContent=`카드정기 ${wonKR(cardFixed)} · 카드외 정기 ${wonKR(nonCardFixed)}`;
-  // 하단 요약 (카드정기지출·카드외 정기지출 항목은 상단으로 이동)
+  // 하단 요약: 기타(카드 비정기) + 총지출 합계
+  // 총지출 = 카드 청구액(체크분) + 카드외 정기지출 (카드정기는 카드값에 이미 포함 → 중복 방지)
+  const grandTotal=cardTotal+nonCardFixed;
   $("expSum").innerHTML=`
-    <div class="exp-box"><div class="lbl">카드 청구액(체크분)</div><div class="num">${wonKR(cardTotal)}</div></div>
     <div class="exp-box"><div class="lbl">기타(카드 비정기)</div><div class="num">${wonKR(cardEtc)}</div></div>
-    <div class="exp-box total"><div class="lbl">정기지출 합계</div><div class="num">${wonKR(fixedTotal)}</div></div>`;
+    <div class="exp-box total"><div class="lbl">${curMonth} 총지출 합계</div><div class="num">${wonKR(grandTotal)}</div></div>`;
 }
 $("cardBill").addEventListener("keydown",e=>{if(e.key==="Enter")addCard();});
 $("fxAmt").addEventListener("keydown",e=>{if(e.key==="Enter")addFixed();});
