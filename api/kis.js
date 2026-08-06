@@ -1,14 +1,15 @@
 // KIS(한국투자증권) OpenAPI 프록시 - Vercel 서버리스 함수
-// 환경변수 필요: KIS_APPKEY, KIS_APPSECRET  (실전투자 기준)
-// 호출 예: /api/kis?symbol=005930
+// 환경변수: KIS_APPKEY, KIS_APPSECRET  (모의투자면 KIS_ENV=mock 추가)
+// 호출:
+//   /api/kis?symbol=005930                 → 현재가/지표
+//   /api/kis?action=daily&symbol=005930    → 최근 일봉(과거 시세)
+//   /api/kis?action=finance&symbol=005930  → 재무비율(ROE·부채비율 등)
 
-// KIS_ENV 환경변수로 실전/모의 전환 (mock 또는 vts 로 설정하면 모의투자 서버 사용)
 const IS_MOCK = /^(mock|vts|모의)$/i.test(process.env.KIS_ENV || "");
 const BASE = IS_MOCK
   ? "https://openapivts.koreainvestment.com:29443" // 모의투자
   : "https://openapi.koreainvestment.com:9443";    // 실전
 
-// 접근토큰 캐시 (같은 인스턴스가 살아있는 동안 재사용 → KIS 재발급 제한 회피)
 let tokenCache = { token: null, exp: 0 };
 
 async function getToken() {
@@ -29,24 +30,72 @@ async function getToken() {
   return tokenCache.token;
 }
 
+function headers(token, tr_id) {
+  return {
+    "content-type": "application/json",
+    authorization: "Bearer " + token,
+    appkey: process.env.KIS_APPKEY,
+    appsecret: process.env.KIS_APPSECRET,
+    tr_id,
+    custtype: "P",
+  };
+}
+
+const num = (v) => (v === undefined || v === null || v === "" ? null : Number(v));
+const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
+
 async function getPrice(symbol) {
   const token = await getToken();
   const url =
-    BASE +
-    "/uapi/domestic-stock/v1/quotations/inquire-price" +
-    "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" +
-    symbol;
-  const r = await fetch(url, {
-    headers: {
-      "content-type": "application/json",
-      authorization: "Bearer " + token,
-      appkey: process.env.KIS_APPKEY,
-      appsecret: process.env.KIS_APPSECRET,
-      tr_id: "FHKST01010100",
-      custtype: "P",
-    },
-  });
-  return r.json();
+    BASE + "/uapi/domestic-stock/v1/quotations/inquire-price" +
+    "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol;
+  const j = await (await fetch(url, { headers: headers(token, "FHKST01010100") })).json();
+  const o = j.output || {};
+  if (!o.stck_prpr) return { error: "데이터 없음", raw: j.msg1 || null };
+  return {
+    name: o.hts_kor_isnm || symbol,
+    price: num(o.stck_prpr), diff: num(o.prdy_vrss), rate: num(o.prdy_ctrt),
+    open: num(o.stck_oprc), high: num(o.stck_hgpr), low: num(o.stck_lwpr),
+    prevClose: num(o.stck_sdpr), per: num(o.per), pbr: num(o.pbr), eps: num(o.eps),
+    w52high: num(o.w52_hgpr), w52low: num(o.w52_lwpr),
+    volume: num(o.acml_vol), marketCap: num(o.hts_avls), // 시가총액(억)
+  };
+}
+
+async function getDaily(symbol) {
+  const token = await getToken();
+  const end = new Date();
+  const start = new Date(); start.setMonth(start.getMonth() - 5); // 약 5개월
+  const url =
+    BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice" +
+    "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol +
+    "&FID_INPUT_DATE_1=" + ymd(start) + "&FID_INPUT_DATE_2=" + ymd(end) +
+    "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
+  const j = await (await fetch(url, { headers: headers(token, "FHKST03010100") })).json();
+  const arr = j.output2 || [];
+  const candles = arr
+    .filter((x) => x.stck_bsop_date && x.stck_clpr)
+    .map((x) => ({ date: x.stck_bsop_date, close: num(x.stck_clpr), vol: num(x.acml_vol) }))
+    .sort((a, b) => a.date.localeCompare(b.date)); // 과거→최근
+  return { candles };
+}
+
+async function getFinance(symbol) {
+  const token = await getToken();
+  const url =
+    BASE + "/uapi/domestic-stock/v1/finance/financial-ratio" +
+    "?FID_DIV_CLS_CODE=0&fid_cond_mrkt_div_code=J&fid_input_iscd=" + symbol;
+  const j = await (await fetch(url, { headers: headers(token, "FHKST66430300") })).json();
+  const o = (j.output && j.output[0]) || null;
+  if (!o) return { error: "재무 데이터 없음" };
+  return {
+    period: o.stac_yymm || null,       // 결산년월
+    roe: num(o.roe_val),               // ROE
+    debtRatio: num(o.lblt_rate),       // 부채비율
+    salesGrowth: num(o.grs),           // 매출액증가율
+    opGrowth: num(o.bsop_prfi_inrt),   // 영업이익증가율
+    eps: num(o.eps), bps: num(o.bps),
+  };
 }
 
 module.exports = async function handler(req, res) {
@@ -54,33 +103,17 @@ module.exports = async function handler(req, res) {
   try {
     if (!process.env.KIS_APPKEY || !process.env.KIS_APPSECRET)
       return res.status(500).json({ error: "환경변수(KIS_APPKEY/KIS_APPSECRET)가 설정되지 않았습니다." });
-
     const symbol = String(req.query.symbol || "").trim();
     if (!/^\d{6}$/.test(symbol))
       return res.status(400).json({ error: "6자리 종목코드를 입력하세요 (예: 005930)" });
 
-    const j = await getPrice(symbol);
-    const o = j.output || {};
-    if (!o.stck_prpr) return res.status(200).json({ error: "데이터 없음", raw: j.msg1 || j });
-
-    const num = (v) => (v === undefined || v === "" ? null : Number(v));
-    res.status(200).json({
-      name: o.hts_kor_isnm || symbol,
-      price: num(o.stck_prpr),      // 현재가
-      diff: num(o.prdy_vrss),       // 전일대비
-      rate: num(o.prdy_ctrt),       // 등락률(%)
-      open: num(o.stck_oprc),       // 시가
-      high: num(o.stck_hgpr),       // 고가
-      low: num(o.stck_lwpr),        // 저가
-      prevClose: num(o.stck_sdpr),  // 전일종가(기준가)
-      per: num(o.per),
-      pbr: num(o.pbr),
-      eps: num(o.eps),
-      w52high: num(o.w52_hgpr),     // 52주 최고
-      w52low: num(o.w52_lwpr),      // 52주 최저
-      volume: num(o.acml_vol),      // 누적거래량
-    });
+    const action = String(req.query.action || "price");
+    let out;
+    if (action === "daily") out = await getDaily(symbol);
+    else if (action === "finance") out = await getFinance(symbol);
+    else out = await getPrice(symbol);
+    res.status(200).json(out);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-}
+};

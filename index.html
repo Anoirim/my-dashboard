@@ -180,6 +180,7 @@
         </select>
         <input type="text" id="ticker" placeholder="국내 6자리 코드 (예: 005930)" style="flex:1">
         <button onclick="loadStock()">조회</button>
+        <label class="filebtn" style="padding:8px 10px;display:flex;align-items:center;gap:6px;white-space:nowrap"><input type="checkbox" id="autoRefresh" onchange="toggleAuto()" style="width:16px;height:16px;margin:0">실시간(5초)</label>
       </div>
       <div class="apikey" id="finnhubBox" style="display:none">
         <input type="text" id="apiKey" placeholder="Finnhub API 키를 여기에 붙여넣기 (한 번만)">
@@ -640,26 +641,47 @@ function onMarketChange(){
 }
 onMarketChange();
 
-function loadStock(){ return $("market").value==="kr" ? loadStockKR() : loadStockUS(); }
+function loadStock(silent){ return $("market").value==="kr" ? loadStockKR(silent) : loadStockUS(silent); }
+
+// 실시간 자동 갱신 (5초)
+let autoTimer=null;
+function toggleAuto(){
+  if($("autoRefresh").checked){
+    loadStock();
+    autoTimer=setInterval(()=>loadStock(true),5000);
+  }else{clearInterval(autoTimer);autoTimer=null;}
+}
 
 /* --- 국내 (KIS 프록시) --- */
-async function loadStockKR(){
+let lastFinanceKR=null, lastSymKR="";
+async function loadStockKR(silent){
   const sym=$("ticker").value.trim();
   const msg=$("stockMsg");
   if(!/^\d{6}$/.test(sym)){msg.textContent="6자리 국내 종목코드를 입력하세요 (예: 005930).";return;}
-  msg.textContent="불러오는 중...";
+  if(sym!==lastSymKR){lastFinanceKR=null;lastSymKR=sym;} // 종목 바뀌면 재무 초기화
+  if(!silent)msg.textContent="불러오는 중...";
   try{
     const d=await fetch(KIS_PROXY+"?symbol="+sym).then(r=>r.json());
-    if(d.error){msg.textContent="오류: "+d.error;$("stockResult").style.display="none";return;}
+    if(d.error){msg.textContent="오류: "+d.error;return;}
     const up=d.diff>=0;
     $("stockName").textContent=`${d.name} (${sym})`;
     $("stockPrice").textContent=d.price.toLocaleString("ko-KR")+"원";
     $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
     $("stockChg").className="chg "+(up?"up":"down");
     $("stockMeta").textContent=`고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`;
-    $("stockResult").style.display="block";msg.textContent="";
-    drawSimpleKR(d);
-    renderEasyKR(d,up);
+    $("stockResult").style.display="block";
+    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+($("autoRefresh").checked?" · 실시간 켜짐":"");
+    // 재무·차트는 수동 조회 때만 (실시간 갱신 시엔 가볍게 유지)
+    if(!silent){
+      try{const fj=await fetch(KIS_PROXY+"?action=finance&symbol="+sym).then(r=>r.json());
+        lastFinanceKR=(fj&&!fj.error)?fj:null;}catch(e){lastFinanceKR=null;}
+      renderEasyKR(d,up);
+      try{const dj=await fetch(KIS_PROXY+"?action=daily&symbol="+sym).then(r=>r.json());
+        if(dj.candles&&dj.candles.length>1)drawDailyKR(dj.candles,d.name);else drawSimpleKR(d);
+      }catch(e){drawSimpleKR(d);}
+    }else{
+      renderEasyKR(d,up); // 실시간: 헤더·해석만 갱신, 차트는 유지
+    }
   }catch(e){msg.textContent="프록시 연결 실패. Vercel 배포와 환경변수를 확인하세요.";}
 }
 function drawSimpleKR(d){
@@ -673,6 +695,20 @@ function drawSimpleKR(d){
       scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},x:{ticks:{color:"#8b97ad"},grid:{display:false}}}}
   });
 }
+function drawDailyKR(candles,name){
+  const ctx=$("stockChart").getContext("2d");
+  if(chart)chart.destroy();
+  const labels=candles.map(c=>c.date.slice(4,6)+"/"+c.date.slice(6,8));
+  const data=candles.map(c=>c.close);
+  const rising=data[data.length-1]>=data[0];
+  chart=new Chart(ctx,{type:"line",
+    data:{labels,datasets:[{data,borderColor:rising?"#33d69f":"#ff5c72",
+      backgroundColor:"transparent",borderWidth:2,pointRadius:0,tension:.15}]},
+    options:{plugins:{legend:{display:false},title:{display:true,text:name+" 최근 시세(종가)",color:"#8b97ad"}},
+      scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
+        x:{ticks:{color:"#8b97ad",maxTicksLimit:8},grid:{display:false}}}}
+  });
+}
 function renderEasyKR(d,up){
   const won=n=>Math.round(n).toLocaleString("ko-KR")+"원";
   const range=d.high-d.low, pos=range>0?((d.price-d.low)/range*100):50;
@@ -682,8 +718,11 @@ function renderEasyKR(d,up){
   const rows=[]; const add=(k,v,rel,n)=>rows.push({k,v,rel,n});
   const volPct=d.prevClose>0?(range/d.prevClose*100):0;
   add("오늘 변동폭",won(range),"low",`하루 고가-저가 차이. 전일가의 ${volPct.toFixed(1)}% ${volPct>4?"→ 꽤 출렁였어요.":"→ 잔잔했어요."}`);
+  if(d.marketCap!=null) add("시가총액",(d.marketCap>=10000?(d.marketCap/10000).toFixed(1)+"조":d.marketCap.toLocaleString()+"억"),"low","회사 전체 가치(규모). 클수록 대형주로 대체로 안정적.");
   if(d.per!=null) add("PER",d.per.toFixed(1),"mid",`버는 돈 대비 주가. ${d.per<10?"낮은 편→저렴.":d.per<25?"보통.":"높은 편→기대 크거나 비쌈."} 같은 업종과 비교하세요.`);
   if(d.pbr!=null) add("PBR",d.pbr.toFixed(2),"mid",`재산 대비 주가. ${d.pbr<1?"1 미만→재산보다 싸게 거래.":"1 이상→재산보다 비싸게."}`);
+  if(lastFinanceKR&&lastFinanceKR.roe!=null) add("ROE",lastFinanceKR.roe.toFixed(1)+"%","high",`자기 돈으로 얼마나 잘 버느냐. ${lastFinanceKR.roe>=15?"높음→효율 좋은 회사.":lastFinanceKR.roe>=8?"양호.":"낮은 편."} 부채와 함께 보세요.`);
+  if(lastFinanceKR&&lastFinanceKR.debtRatio!=null) add("부채비율",lastFinanceKR.debtRatio.toFixed(0)+"%","high",`빚이 자기자본 대비 얼마나 되나. ${lastFinanceKR.debtRatio<100?"100% 미만→재무 안정적.":lastFinanceKR.debtRatio<200?"보통 수준.":"높은 편→부담 큼."}`);
   if(d.eps!=null) add("EPS",won(d.eps),"mid","1주당 순이익. 매년 늘면 성장 중이라는 뜻.");
   if(d.w52high!=null&&d.w52low!=null&&d.w52high>d.w52low){
     const p=((d.price-d.w52low)/(d.w52high-d.w52low)*100);
@@ -694,14 +733,14 @@ function renderEasyKR(d,up){
 }
 
 /* --- 해외 (Finnhub) --- */
-async function loadStockUS(){
+async function loadStockUS(silent){
   const key=$("apiKey").value.trim();
   const sym=$("ticker").value.trim().toUpperCase();
   const msg=$("stockMsg");
   if(!key){msg.textContent="먼저 Finnhub API 키를 입력하세요.";return;}
   if(!sym){msg.textContent="종목 코드를 입력하세요.";return;}
   localStorage.setItem("finnhubKey",key);
-  msg.textContent="불러오는 중...";
+  if(!silent)msg.textContent="불러오는 중...";
   try{
     // 현재가
     const q=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${key}`).then(r=>r.json());
