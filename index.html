@@ -225,7 +225,8 @@
         <span>🔁 정기지출 항목 (결제일 · 결제수단)</span>
         <span>합계 <b id="fixedTotalTop" style="color:var(--accent);font-size:16px">0원</b></span>
       </div>
-      <div class="hint" id="fixedBreakdown" style="margin:-4px 0 10px">카드정기 0원 · 카드외 정기 0원</div>
+      <div class="hint" id="fixedBreakdown" style="margin:-4px 0 8px">카드정기 0원 · 카드외 정기 0원</div>
+      <button class="filebtn" style="margin-bottom:10px;padding:7px 11px" onclick="carryFixedFromPrev()">↩ 직전 달 정기지출 불러오기</button>
       <div class="row" style="margin-bottom:10px">
         <input type="number" id="fxDay" min="1" max="31" placeholder="결제일" style="width:80px">
         <input type="text" id="fxName" placeholder="항목명 (예: 넷플릭스, 통신비)" style="flex:1">
@@ -516,6 +517,21 @@ function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
 function buildMethodOptions(sel){
   const opts=["계좌/현금",...cards.map(c=>c.name)];
   $("fxMethod").innerHTML=opts.map(o=>`<option ${o===sel?"selected":""}>${o}</option>`).join("");
+}
+
+// 직전 달의 정기지출·카드를 현재 달로 이월 (중복 제외)
+function carryFixedFromPrev(){
+  const prev=Object.keys(expData).filter(k=>k<curMonth && expData[k].fixed && expData[k].fixed.length).sort().pop();
+  if(!prev){alert("이월할 이전 달 정기지출이 없어요.");return;}
+  let added=0;
+  expData[prev].fixed.forEach(pf=>{
+    if(!fixed.some(f=>f.name===pf.name&&f.method===pf.method)){fixed.push(JSON.parse(JSON.stringify(pf)));added++;}
+  });
+  (expData[prev].cards||[]).forEach(pc=>{
+    if(!cards.some(c=>c.name===pc.name))cards.push({name:pc.name,day:pc.day,bill:0,inc:pc.inc!==false});
+  });
+  saveExpData();renderExpAll();
+  alert(prev+" 기준 정기지출 "+added+"건을 불러왔어요.");
 }
 
 function renderExpAll(){
