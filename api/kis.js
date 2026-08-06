@@ -99,6 +99,17 @@ async function getFinance(symbol) {
   };
 }
 
+// 한 번의 호출로 현재가+종목명+일별차트+재무를 모두 반환 (토큰 1개 공유 → 발급제한 회피)
+async function getFull(symbol) {
+  const p = await getPrice(symbol);          // 토큰 최초 발급(캐시)
+  if (p.error) return p;
+  let name = p.name, candles = [];
+  try { const dd = await getDaily(symbol); name = dd.name || name; candles = dd.candles; } catch (e) {}
+  let roe = null, debtRatio = null;
+  try { const f = await getFinance(symbol); if (f && !f.error) { roe = f.roe; debtRatio = f.debtRatio; } } catch (e) {}
+  return { ...p, name, candles, roe, debtRatio };
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try {
@@ -128,7 +139,8 @@ module.exports = async function handler(req, res) {
     }
     else if (action === "daily") out = await getDaily(symbol);
     else if (action === "finance") out = await getFinance(symbol);
-    else out = await getPrice(symbol);
+    else if (action === "quote") out = await getPrice(symbol);   // 실시간용(가벼움)
+    else out = await getFull(symbol);                            // 기본: 전체(현재가+이름+차트+재무)
     res.status(200).json(out);
   } catch (e) {
     res.status(500).json({ error: e.message });

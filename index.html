@@ -661,29 +661,25 @@ async function loadStockKR(silent){
   if(sym!==lastSymKR){lastFinanceKR=null;lastSymKR=sym;} // 종목 바뀌면 재무 초기화
   if(!silent)msg.textContent="불러오는 중...";
   try{
-    const d=await fetch(KIS_PROXY+"?symbol="+sym).then(r=>r.json());
+    // 실시간은 가벼운 quote, 수동 조회는 전체(이름+차트+재무)를 한 번에
+    const d=await fetch(KIS_PROXY+(silent?"?action=quote&symbol=":"?symbol=")+sym).then(r=>r.json());
     if(d.error){msg.textContent="오류: "+d.error;return;}
     const up=d.diff>=0;
-    // 이름이 코드와 같으면(현재가 API가 이름 미제공) 코드만 표시 → 잠시 후 일별시세에서 실제 이름으로 교체
-    $("stockName").textContent=(d.name&&d.name!==sym)?`${d.name} (${sym})`:sym;
+    const nm=(d.name&&d.name!==sym)?d.name:sym;
+    $("stockName").textContent=(nm!==sym)?`${nm} (${sym})`:sym;
     $("stockPrice").textContent=d.price.toLocaleString("ko-KR")+"원";
     $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
     $("stockChg").className="chg "+(up?"up":"down");
     $("stockMeta").textContent=`고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`;
     $("stockResult").style.display="block";
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+($("autoRefresh").checked?" · 실시간 켜짐":"");
-    // 재무·차트는 수동 조회 때만 (실시간 갱신 시엔 가볍게 유지)
     if(!silent){
-      try{const fj=await fetch(KIS_PROXY+"?action=finance&symbol="+sym).then(r=>r.json());
-        lastFinanceKR=(fj&&!fj.error)?fj:null;}catch(e){lastFinanceKR=null;}
+      // 전체 응답에 재무·차트 포함
+      lastFinanceKR=(d.roe!=null||d.debtRatio!=null)?{roe:d.roe,debtRatio:d.debtRatio}:null;
       renderEasyKR(d,up);
-      try{const dj=await fetch(KIS_PROXY+"?action=daily&symbol="+sym).then(r=>r.json());
-        const nm=dj.name||d.name; // 일별시세가 종목명을 확실히 줌
-        if(nm)$("stockName").textContent=`${nm} (${sym})`;
-        if(dj.candles&&dj.candles.length>1)drawDailyKR(dj.candles,nm);else drawSimpleKR(d);
-      }catch(e){drawSimpleKR(d);}
+      if(d.candles&&d.candles.length>1)drawDailyKR(d.candles,nm);else drawSimpleKR(d);
     }else{
-      renderEasyKR(d,up); // 실시간: 헤더·해석만 갱신, 차트는 유지
+      renderEasyKR(d,up); // 실시간: 헤더·해석만 갱신(차트 유지)
     }
   }catch(e){msg.textContent="프록시 연결 실패. Vercel 배포와 환경변수를 확인하세요.";}
 }
