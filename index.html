@@ -81,6 +81,14 @@
   .exp-label{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:600}
   .exp-divider{height:1px;background:var(--border);margin:18px 0}
   .exp-edit{color:var(--accent)!important;border:none;background:transparent;cursor:pointer;padding:4px 6px;font-size:13px}
+  /* 보유 종목 테이블 */
+  .htbl{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap;min-width:720px}
+  .htbl th,.htbl td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--border)}
+  .htbl th{color:var(--muted);font-weight:600;background:var(--card)}
+  .htbl td.l,.htbl th.l{text-align:left}
+  .htbl tbody tr:hover td{background:var(--card2)}
+  .htbl .acct{font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(51,214,159,.15);color:var(--accent2)}
+  .htbl tfoot td{font-weight:700;border-top:2px solid var(--accent);border-bottom:none;background:var(--card2)}
   .b-high{background:rgba(51,214,159,.15);color:var(--accent2)}
   .b-mid{background:rgba(245,166,35,.15);color:#f5a623}
   .b-low{background:rgba(139,151,173,.15);color:var(--muted)}
@@ -201,6 +209,18 @@
         </div>
       </div>
       <div class="hint" id="stockMsg"></div>
+    </div>
+
+    <!-- 내 보유 종목 (두 계좌 통합) -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#33d69f"></span>내 보유 종목 (두 계좌 통합)</h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="number" id="hFee" value="0.015" step="0.001" style="width:150px" placeholder="수수료 편도(%)">
+        <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)">
+        <button onclick="loadHoldings()">불러오기</button>
+        <span class="hint" id="hMsg" style="margin:0"></span>
+      </div>
+      <div id="holdingsWrap" style="overflow-x:auto"></div>
     </div>
 
     <!-- 월 지출 관리 -->
@@ -847,6 +867,57 @@ function drawSimple(sym,q){
       scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
               x:{ticks:{color:"#8b97ad"},grid:{display:false}}}}
   });
+}
+
+/* ===== 내 보유 종목 (두 계좌 통합) ===== */
+const ETF_KW=["KODEX","TIGER","RISE","ACE","SOL","PLUS","KBSTAR","ARIRANG","HANARO","KOSEF","TIMEFOLIO","ETF","ETN"];
+function isEtfName(n){return n&&ETF_KW.some(k=>n.toUpperCase().includes(k));}
+async function loadHoldings(){
+  const msg=$("hMsg");msg.textContent="불러오는 중...";
+  try{
+    const r=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json());
+    if(r.error){msg.textContent="오류: "+r.error;return;}
+    const hs=r.holdings||[];
+    if(!hs.length)$("holdingsWrap").innerHTML='<div class="hint">보유 종목이 없거나 계좌가 설정되지 않았어요.</div>';
+    else renderHoldings(hs);
+    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
+  }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCTS)와 배포를 확인하세요.";}
+}
+function renderHoldings(hs){
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR");
+  const fee=(parseFloat($("hFee").value)||0)/100, tgt=(parseFloat($("hTarget").value)||0)/100;
+  let totCost=0,totEval=0,totPnl=0;
+  const body=hs.map(h=>{
+    const etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
+    const bep=h.avg*(1+fee)/denom, target=h.avg*(1+fee)*(1+tgt)/denom;
+    const cost=h.avg*h.qty; totCost+=cost; totEval+=(h.evalAmt||h.price*h.qty); totPnl+=(h.pnl||0);
+    const up=(h.pnl||0)>=0;
+    return `<tr>
+      <td class="l"><span class="acct">${h.account}</span></td>
+      <td class="l">${h.name}<span style="color:var(--muted);font-size:11px"> ${h.code}</span></td>
+      <td>${h.qty.toLocaleString()}</td>
+      <td>${won(h.avg)}</td>
+      <td>${won(h.price)}</td>
+      <td>${won(h.evalAmt)}</td>
+      <td class="${up?"up":"down"}">${up?"+":""}${won(h.pnl)} <span style="font-size:11px">(${h.pnlRate}%)</span></td>
+      <td>${won(bep)}</td>
+      <td style="color:var(--accent2)">${won(target)}</td>
+    </tr>`;
+  }).join("");
+  const tup=totPnl>=0;
+  $("holdingsWrap").innerHTML=`<table class="htbl">
+    <thead><tr>
+      <th class="l">계좌</th><th class="l">종목</th><th>수량</th><th>매입가</th><th>현재가</th>
+      <th>평가금액</th><th>평가손익</th><th>본전가</th><th>목표가(+${$("hTarget").value}%)</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr>
+      <td class="l" colspan="5">합계</td>
+      <td>${won(totEval)}</td>
+      <td class="${tup?"up":"down"}">${tup?"+":""}${won(totPnl)}</td>
+      <td class="l" colspan="2" style="color:var(--muted);font-weight:600">매입 ${won(totCost)} · 수익률 ${(totCost?totPnl/totCost*100:0).toFixed(2)}%</td>
+    </tr></tfoot>
+  </table>`;
 }
 
 /* ===== 자동 기록 초기화 (마지막에 실행) ===== */

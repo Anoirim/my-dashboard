@@ -153,16 +153,63 @@ async function getFull(symbol) {
   return { ...p, name, candles, isEtf: false, roe, debtRatio };
 }
 
+// --- 잔고조회 (두 계좌 통합) ---
+// 환경변수 KIS_ACCTS 예: "일반=1234567801,ISA=8765432101" (이름=계좌번호, 번호는 10자리)
+function parseAccts() {
+  return (process.env.KIS_ACCTS || "")
+    .split(",").map((s) => s.trim()).filter(Boolean)
+    .map((s) => {
+      const [label, no] = s.includes("=") ? [s.split("=")[0], s.split("=")[1]] : ["계좌", s];
+      const digits = (no || "").replace(/[^0-9]/g, "");
+      return { label: label.trim(), cano: digits.slice(0, 8), prdt: digits.slice(8, 10) };
+    })
+    .filter((a) => a.cano.length === 8 && a.prdt.length === 2);
+}
+async function getBalance() {
+  const accts = parseAccts();
+  if (!accts.length) return { error: "계좌가 설정되지 않았습니다 (환경변수 KIS_ACCTS)" };
+  const token = await getToken();
+  const trId = IS_MOCK ? "VTTC8434R" : "TTTC8434R";
+  const holdings = [];
+  const errors = [];
+  for (const a of accts) {
+    try {
+      const q = new URLSearchParams({
+        CANO: a.cano, ACNT_PRDT_CD: a.prdt, AFHR_FLPR_YN: "N", OFL_YN: "",
+        INQR_DVSN: "02", UNPR_DVSN: "01", FUND_STTL_ICLD_YN: "N",
+        FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00", CTX_AREA_FK100: "", CTX_AREA_NK100: "",
+      }).toString();
+      const url = BASE + "/uapi/domestic-stock/v1/trading/inquire-balance?" + q;
+      const j = await (await fetch(url, { headers: headers(token, trId) })).json();
+      if (j.rt_cd !== "0") { errors.push(a.label + ": " + (j.msg1 || "조회 실패")); continue; }
+      (j.output1 || []).forEach((o) => {
+        const qty = num(o.hldg_qty);
+        if (!qty) return;
+        holdings.push({
+          account: a.label, code: o.pdno, name: o.prdt_name, qty,
+          avg: num(o.pchs_avg_pric), price: num(o.prpr),
+          evalAmt: num(o.evlu_amt), pnl: num(o.evlu_pfls_amt), pnlRate: num(o.evlu_pfls_rt),
+        });
+      });
+    } catch (e) { errors.push(a.label + ": " + e.message); }
+  }
+  return { holdings, errors: errors.length ? errors : null };
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try {
     if (!process.env.KIS_APPKEY || !process.env.KIS_APPSECRET)
       return res.status(500).json({ error: "환경변수(KIS_APPKEY/KIS_APPSECRET)가 설정되지 않았습니다." });
+    const action = String(req.query.action || "price");
+
+    // 잔고조회는 종목코드 불필요
+    if (action === "balance") { res.status(200).json(await getBalance()); return; }
+
     const symbol = String(req.query.symbol || "").trim();
     if (!/^\d{6}$/.test(symbol))
       return res.status(400).json({ error: "6자리 종목코드를 입력하세요 (예: 005930)" });
 
-    const action = String(req.query.action || "price");
     let out;
     if (action === "debug") {
       // 진단: KIS 원본 응답에서 종목명 후보 필드 확인
