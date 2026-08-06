@@ -173,13 +173,17 @@
     <!-- 주식 -->
     <div class="card full">
       <h2><span class="dot" style="background:#f5a623"></span>주식 분석</h2>
-      <div class="apikey">
-        <input type="text" id="apiKey" placeholder="Finnhub API 키를 여기에 붙여넣기 (한 번만)">
-        <div class="hint">무료 키 발급: <a href="https://finnhub.io/register" target="_blank">finnhub.io/register</a> → 가입 후 대시보드의 API Key 복사. 키는 이 브라우저에만 저장됩니다.</div>
-      </div>
-      <div class="row" style="margin-bottom:16px">
-        <input type="text" id="ticker" placeholder="종목 코드 (예: AAPL, TSLA, MSFT)" style="flex:1;text-transform:uppercase">
+      <div class="row" style="margin-bottom:12px">
+        <select id="market" onchange="onMarketChange()" style="width:140px">
+          <option value="kr">국내 (KIS)</option>
+          <option value="us">해외 (Finnhub)</option>
+        </select>
+        <input type="text" id="ticker" placeholder="국내 6자리 코드 (예: 005930)" style="flex:1">
         <button onclick="loadStock()">조회</button>
+      </div>
+      <div class="apikey" id="finnhubBox" style="display:none">
+        <input type="text" id="apiKey" placeholder="Finnhub API 키를 여기에 붙여넣기 (한 번만)">
+        <div class="hint">해외 주식용. 무료 키: <a href="https://finnhub.io/register" target="_blank">finnhub.io/register</a>. 키는 이 브라우저에만 저장됩니다.</div>
       </div>
       <div id="stockResult" style="display:none">
         <div class="stock-head">
@@ -620,13 +624,75 @@ function calcTrade(){
     + rows.map(x=>`<div class="easy-row"><div class="easy-k">${x[0]}</div><div class="easy-v">${x[1]}</div><div class="easy-n">${x[2]}</div></div>`).join("");
 }
 
-/* ===== 주식 (Finnhub) ===== */
+/* ===== 주식 (국내 KIS / 해외 Finnhub) ===== */
 let chart=null;
+const KIS_PROXY="/api/kis"; // Vercel 서버리스 프록시 (같은 도메인)
 $("apiKey").value = localStorage.getItem("finnhubKey")||"";
 $("apiKey").addEventListener("change",e=>localStorage.setItem("finnhubKey",e.target.value.trim()));
 $("ticker").addEventListener("keydown",e=>{if(e.key==="Enter")loadStock();});
 
-async function loadStock(){
+function onMarketChange(){
+  const kr=$("market").value==="kr";
+  $("finnhubBox").style.display=kr?"none":"block";
+  $("ticker").placeholder=kr?"국내 6자리 코드 (예: 005930)":"해외 코드 (예: AAPL, TSLA)";
+  $("ticker").style.textTransform=kr?"none":"uppercase";
+}
+onMarketChange();
+
+function loadStock(){ return $("market").value==="kr" ? loadStockKR() : loadStockUS(); }
+
+/* --- 국내 (KIS 프록시) --- */
+async function loadStockKR(){
+  const sym=$("ticker").value.trim();
+  const msg=$("stockMsg");
+  if(!/^\d{6}$/.test(sym)){msg.textContent="6자리 국내 종목코드를 입력하세요 (예: 005930).";return;}
+  msg.textContent="불러오는 중...";
+  try{
+    const d=await fetch(KIS_PROXY+"?symbol="+sym).then(r=>r.json());
+    if(d.error){msg.textContent="오류: "+d.error;$("stockResult").style.display="none";return;}
+    const up=d.diff>=0;
+    $("stockPrice").textContent=d.price.toLocaleString("ko-KR")+"원";
+    $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
+    $("stockChg").className="chg "+(up?"up":"down");
+    $("stockMeta").textContent=`${d.name} · 고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`;
+    $("stockResult").style.display="block";msg.textContent="";
+    drawSimpleKR(d);
+    renderEasyKR(d,up);
+  }catch(e){msg.textContent="프록시 연결 실패. Vercel 배포와 환경변수를 확인하세요.";}
+}
+function drawSimpleKR(d){
+  const ctx=$("stockChart").getContext("2d");
+  if(chart)chart.destroy();
+  chart=new Chart(ctx,{type:"bar",
+    data:{labels:["시가","고가","저가","현재가"],
+      datasets:[{data:[d.open,d.high,d.low,d.price],
+        backgroundColor:["#4f8cff","#33d69f","#ff5c72","#f5a623"],borderRadius:6}]},
+    options:{plugins:{legend:{display:false},title:{display:true,text:d.name+" 당일 지표",color:"#8b97ad"}},
+      scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},x:{ticks:{color:"#8b97ad"},grid:{display:false}}}}
+  });
+}
+function renderEasyKR(d,up){
+  const won=n=>Math.round(n).toLocaleString("ko-KR")+"원";
+  const range=d.high-d.low, pos=range>0?((d.price-d.low)/range*100):50;
+  let ov=`오늘 <b>${d.name}</b>은(는) 전일보다 <b>${up?"올랐어요 ▲":"내렸어요 ▼"}</b> (${d.rate}%). `;
+  ov+= pos>66?"장중 <b>높은 쪽</b>(강세).":pos<33?"장중 <b>낮은 쪽</b>(약세).":"장중 <b>가운데쯤</b>.";
+  $("easyOverall").innerHTML=ov;
+  const rows=[]; const add=(k,v,rel,n)=>rows.push({k,v,rel,n});
+  const volPct=d.prevClose>0?(range/d.prevClose*100):0;
+  add("오늘 변동폭",won(range),"low",`하루 고가-저가 차이. 전일가의 ${volPct.toFixed(1)}% ${volPct>4?"→ 꽤 출렁였어요.":"→ 잔잔했어요."}`);
+  if(d.per!=null) add("PER",d.per.toFixed(1),"mid",`버는 돈 대비 주가. ${d.per<10?"낮은 편→저렴.":d.per<25?"보통.":"높은 편→기대 크거나 비쌈."} 같은 업종과 비교하세요.`);
+  if(d.pbr!=null) add("PBR",d.pbr.toFixed(2),"mid",`재산 대비 주가. ${d.pbr<1?"1 미만→재산보다 싸게 거래.":"1 이상→재산보다 비싸게."}`);
+  if(d.eps!=null) add("EPS",won(d.eps),"mid","1주당 순이익. 매년 늘면 성장 중이라는 뜻.");
+  if(d.w52high!=null&&d.w52low!=null&&d.w52high>d.w52low){
+    const p=((d.price-d.w52low)/(d.w52high-d.w52low)*100);
+    add("1년 위치",p.toFixed(0)+"%","low",`1년 최저(${d.w52low.toLocaleString()})~최고(${d.w52high.toLocaleString()}) 중 지금. ${p>70?"고점 근처.":p<30?"저점 근처.":"중간쯤."}`);
+  }
+  const badge=rel=>({high:'<span class="badge b-high">신뢰도 높음</span>',mid:'<span class="badge b-mid">신뢰도 중간</span>',low:'<span class="badge b-low">참고용</span>'}[rel]||"");
+  $("easyList").innerHTML=rows.map(r=>`<div class="easy-row"><div class="easy-k">${r.k}${badge(r.rel)}</div><div class="easy-v">${r.v}</div><div class="easy-n">${r.n}</div></div>`).join("");
+}
+
+/* --- 해외 (Finnhub) --- */
+async function loadStockUS(){
   const key=$("apiKey").value.trim();
   const sym=$("ticker").value.trim().toUpperCase();
   const msg=$("stockMsg");
