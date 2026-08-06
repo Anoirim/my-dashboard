@@ -12,8 +12,33 @@ const BASE = IS_MOCK
 
 let tokenCache = { token: null, exp: 0 };
 
+// --- Vercel KV / Upstash 토큰 저장소 (있으면 사용) ---
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+async function kvGet(key) {
+  if (!KV_URL || !KV_TOKEN) return null;
+  try {
+    const r = await fetch(`${KV_URL}/get/${key}`, { headers: { Authorization: `Bearer ${KV_TOKEN}` } });
+    const j = await r.json();
+    return j.result || null;
+  } catch (e) { return null; }
+}
+async function kvSet(key, val, exSec) {
+  if (!KV_URL || !KV_TOKEN) return;
+  try {
+    await fetch(`${KV_URL}/set/${key}/${encodeURIComponent(val)}?EX=${exSec}`, {
+      headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    });
+  } catch (e) {}
+}
+
 async function getToken() {
+  // 1) 같은 인스턴스 메모리 캐시
   if (tokenCache.token && Date.now() < tokenCache.exp) return tokenCache.token;
+  // 2) KV 저장소 (인스턴스 간 공유 → 하루 1회만 발급)
+  const saved = await kvGet("kis_token");
+  if (saved) { tokenCache = { token: saved, exp: Date.now() + 60 * 60 * 1000 }; return saved; }
+  // 3) 신규 발급
   const r = await fetch(BASE + "/oauth2/tokenP", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -25,8 +50,9 @@ async function getToken() {
   });
   const j = await r.json();
   if (!j.access_token) throw new Error(j.error_description || j.msg1 || "토큰 발급 실패");
-  const ttl = (j.expires_in ? j.expires_in - 60 : 23 * 3600) * 1000;
-  tokenCache = { token: j.access_token, exp: Date.now() + ttl };
+  const lifeSec = j.expires_in ? j.expires_in : 23 * 3600;
+  tokenCache = { token: j.access_token, exp: Date.now() + (lifeSec - 60) * 1000 };
+  await kvSet("kis_token", j.access_token, lifeSec - 300); // KV엔 만료 5분 전까지 보관
   return tokenCache.token;
 }
 
