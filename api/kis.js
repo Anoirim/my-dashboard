@@ -110,7 +110,23 @@ module.exports = async function handler(req, res) {
 
     const action = String(req.query.action || "price");
     let out;
-    if (action === "daily") out = await getDaily(symbol);
+    if (action === "debug") {
+      // 진단: KIS 원본 응답에서 종목명 후보 필드 확인
+      const token = await getToken();
+      const pUrl = BASE + "/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol;
+      const pj = await (await fetch(pUrl, { headers: headers(token, "FHKST01010100") })).json();
+      const end = new Date(); const start = new Date(); start.setMonth(start.getMonth() - 1);
+      const dUrl = BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol + "&FID_INPUT_DATE_1=" + ymd(start) + "&FID_INPUT_DATE_2=" + ymd(end) + "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
+      const dj = await (await fetch(dUrl, { headers: headers(token, "FHKST03010100") })).json();
+      out = {
+        price_rt_cd: pj.rt_cd, price_msg: pj.msg1,
+        price_output_keys: Object.keys(pj.output || {}),
+        price_name_candidates: { hts_kor_isnm: (pj.output||{}).hts_kor_isnm, rprs_mrkt_kor_name: (pj.output||{}).rprs_mrkt_kor_name },
+        daily_rt_cd: dj.rt_cd, daily_msg: dj.msg1,
+        daily_output1: dj.output1 || null,
+      };
+    }
+    else if (action === "daily") out = await getDaily(symbol);
     else if (action === "finance") out = await getFinance(symbol);
     else out = await getPrice(symbol);
     res.status(200).json(out);
