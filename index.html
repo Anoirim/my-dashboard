@@ -551,9 +551,15 @@ function renderExpAll(){
   $("cardTotalTop").textContent=wonKR(cardTotal);
   const nonCardFixed=fixed.filter(f=>f.method==="계좌/현금").reduce((s,f)=>s+f.amt,0);
   const fixedTotal=fixed.reduce((s,f)=>s+f.amt,0);
+  // 기타(비정기): 체크된 카드 청구액 중 정기지출로 잡히지 않은 나머지
+  const cardEtcTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>{
+    const inc=fixed.filter(f=>f.method===c.name).reduce((a,f)=>a+f.amt,0);
+    return s+(c.bill-inc);
+  },0);
   $("expSum").innerHTML=`
     <div class="exp-box"><div class="lbl">카드 청구액(체크분)</div><div class="num">${wonKR(cardTotal)}</div></div>
     <div class="exp-box"><div class="lbl">정기지출 합계</div><div class="num">${wonKR(fixedTotal)}</div></div>
+    <div class="exp-box"><div class="lbl">기타(비정기)</div><div class="num">${wonKR(cardEtcTotal)}</div></div>
     <div class="exp-box"><div class="lbl">카드 외 정기지출</div><div class="num">${wonKR(nonCardFixed)}</div></div>
     <div class="exp-box total"><div class="lbl">${curMonth} 월 총지출</div><div class="num">${wonKR(cardTotal+nonCardFixed)}</div></div>`;
 }
