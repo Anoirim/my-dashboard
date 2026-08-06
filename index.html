@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>나의 대시보드</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1420; --card:#1a2130; --card2:#232c3d;
+    --text:#e6ebf5; --muted:#8b97ad; --accent:#4f8cff; --accent2:#33d69f;
+    --danger:#ff5c72; --border:#2a3346;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:"Segoe UI",system-ui,sans-serif}
+  body{background:var(--bg);color:var(--text);padding:24px;min-height:100vh}
+  h1{font-size:22px;margin-bottom:4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px}
+  .card h2{font-size:16px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+  .card h2 .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  /* 타이머 */
+  .timer-display{font-size:52px;font-weight:700;text-align:center;letter-spacing:2px;margin:8px 0 16px;font-variant-numeric:tabular-nums}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  input,button,select{font-size:14px;border-radius:8px;border:1px solid var(--border);
+    background:var(--card2);color:var(--text);padding:10px 12px;outline:none}
+  input:focus,select:focus{border-color:var(--accent)}
+  button{cursor:pointer;background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;transition:.15s}
+  button:hover{opacity:.88}
+  button.ghost{background:transparent;color:var(--muted);border-color:var(--border)}
+  button.ok{background:var(--accent2);border-color:var(--accent2)}
+  button.del{background:transparent;color:var(--danger);border:none;padding:4px 8px}
+  .presets button{background:var(--card2);border-color:var(--border);color:var(--text);font-weight:500;padding:8px 12px}
+  /* 스케줄러 */
+  .sched-list{list-style:none;margin-top:14px;display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto}
+  .sched-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;
+    padding:10px 12px;display:flex;align-items:center;gap:10px}
+  .sched-item.done .txt{text-decoration:line-through;color:var(--muted)}
+  .sched-item .time{color:var(--accent);font-size:12px;font-weight:600;min-width:44px}
+  .sched-item .txt{flex:1;font-size:14px}
+  .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
+  /* 주식 */
+  .stock-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .price{font-size:32px;font-weight:700}
+  .chg{font-size:14px;font-weight:600}
+  .up{color:var(--accent2)} .down{color:var(--danger)}
+  .meta{color:var(--muted);font-size:12px;margin-bottom:12px}
+  .apikey{margin-bottom:12px}
+  .apikey input{width:100%}
+  .hint{color:var(--muted);font-size:12px;margin-top:6px;line-height:1.5}
+  .hint a{color:var(--accent)}
+  canvas{margin-top:10px}
+  .full{grid-column:1/-1}
+  /* 백업 바 */
+  .backup-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+  .filebtn{cursor:pointer;background:transparent;color:var(--muted);border:1px solid var(--border);
+    border-radius:8px;padding:10px 12px;font-size:14px;font-weight:600}
+  .filebtn:hover{border-color:var(--accent);color:var(--text)}
+  .filebtn input{display:none}
+  /* 쉬운 해석 */
+  .easy{margin-top:18px;background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .easy-title{font-size:14px;font-weight:700;margin-bottom:10px}
+  .easy-overall{background:rgba(79,140,255,.12);border:1px solid var(--accent);border-radius:8px;
+    padding:10px 12px;font-size:14px;line-height:1.6;margin-bottom:12px}
+  .easy-row{display:flex;gap:10px;padding:9px 0;border-top:1px solid var(--border)}
+  .easy-row:first-child{border-top:none}
+  .easy-k{min-width:110px;font-size:13px;font-weight:600;color:var(--text);display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+  .easy-v{font-size:13px;color:var(--accent);font-weight:700;min-width:64px}
+  .easy-n{flex:1;font-size:13px;color:var(--muted);line-height:1.5}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px}
+  /* 월 지출 */
+  .exp-sum{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+  .exp-box{flex:1;min-width:140px;background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+  .exp-box .lbl{font-size:12px;color:var(--muted);margin-bottom:4px}
+  .exp-box .num{font-size:20px;font-weight:700}
+  .exp-box.total{border-color:var(--accent)}
+  .exp-box.total .num{color:var(--accent)}
+  .exp-tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--border);color:var(--muted)}
+  .exp-tag.card{background:rgba(255,143,171,.15);color:#ff8fab}
+  .exp-amt{font-weight:700;font-size:14px}
+  .exp-label{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:600}
+  .exp-divider{height:1px;background:var(--border);margin:18px 0}
+  .exp-edit{color:var(--accent)!important;border:none;background:transparent;cursor:pointer;padding:4px 6px;font-size:13px}
+  .b-high{background:rgba(51,214,159,.15);color:var(--accent2)}
+  .b-mid{background:rgba(245,166,35,.15);color:#f5a623}
+  .b-low{background:rgba(139,151,173,.15);color:var(--muted)}
+</style>
+</head>
+<body>
+  <h1>나의 대시보드</h1>
+  <div class="sub" id="today"></div>
+
+  <div class="backup-bar">
+    <button class="ghost" id="fileBtn" onclick="connectFile()">🔗 자동 기록 파일 연결</button>
+    <span id="fileStatus" class="hint" style="margin:0">파일에 자동 저장하려면 연결하세요</span>
+    <button class="ghost" onclick="backupData()">💾 백업</button>
+    <label class="filebtn">📂 복원<input type="file" accept="application/json" onchange="restoreData(this)"></label>
+  </div>
+
+  <div class="grid">
+    <!-- 타이머 -->
+    <div class="card">
+      <h2><span class="dot"></span>타이머</h2>
+      <div class="timer-display" id="timerDisplay">02:00</div>
+      <div class="row presets" style="margin-bottom:12px">
+        <button onclick="setTimer(2)">2분</button>
+        <button onclick="setTimer(10)">10분</button>
+        <button onclick="setTimer(15)">15분</button>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <input type="number" id="customH" placeholder="시" style="width:70px" min="0">
+        <input type="number" id="customM" placeholder="분" style="width:70px" min="0" max="59">
+        <input type="number" id="customS" placeholder="초" style="width:70px" min="0" max="59">
+        <button onclick="setTimerCustom()">설정</button>
+      </div>
+      <div class="row">
+        <button class="ok" id="startBtn" onclick="toggleTimer()">시작</button>
+        <button class="ghost" onclick="resetTimer()">리셋</button>
+      </div>
+    </div>
+
+    <!-- 스케줄러 -->
+    <div class="card">
+      <h2><span class="dot" style="background:var(--accent2)"></span>스케줄러</h2>
+      <div class="row">
+        <input type="time" id="schedTime" style="width:120px">
+        <input type="text" id="schedText" placeholder="할 일 입력" style="flex:1">
+        <button onclick="addSched()">추가</button>
+      </div>
+      <ul class="sched-list" id="schedList"></ul>
+    </div>
+
+    <!-- 안약 스케줄러 -->
+    <div class="card">
+      <h2><span class="dot" style="background:#f5a623"></span>안약 복용 <span id="eyeCount" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div id="eyeDate" class="hint" style="margin-bottom:10px"></div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오전</div>
+          <ul class="sched-list" id="eyeAM" style="margin-top:0"></ul>
+        </div>
+        <div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오후</div>
+          <ul class="sched-list" id="eyePM" style="margin-top:0"></ul>
+        </div>
+      </div>
+      <button class="ghost" style="margin-top:14px;width:100%" onclick="resetEye()">오늘 기록 초기화</button>
+    </div>
+
+    <!-- 매매 계산기 -->
+    <div class="card">
+      <h2><span class="dot" style="background:#c77dff"></span>본전·목표가 계산기</h2>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="row">
+          <input type="number" id="calcBuy" placeholder="매수가 (원)" style="flex:1">
+        </div>
+        <div class="row">
+          <input type="number" id="calcFee" placeholder="수수료율 편도(%)" value="0.015" step="0.001" style="flex:1">
+          <select id="calcType" style="flex:1">
+            <option value="stock">주식 (거래세 0.20%)</option>
+            <option value="etf">ETF (거래세 면제)</option>
+          </select>
+        </div>
+        <div class="row">
+          <input type="number" id="calcTarget" placeholder="목표 순수익률(%) - 선택" step="0.1" style="flex:1">
+          <button onclick="calcTrade()">계산</button>
+        </div>
+      </div>
+      <div id="calcOut" class="easy" style="display:none;margin-top:14px"></div>
+      <div class="hint" style="margin-top:8px">수수료율은 본인 계좌 기준으로 입력하세요(HTS 수수료 안내에서 확인).</div>
+    </div>
+
+    <!-- 주식 -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#f5a623"></span>주식 분석</h2>
+      <div class="apikey">
+        <input type="text" id="apiKey" placeholder="Finnhub API 키를 여기에 붙여넣기 (한 번만)">
+        <div class="hint">무료 키 발급: <a href="https://finnhub.io/register" target="_blank">finnhub.io/register</a> → 가입 후 대시보드의 API Key 복사. 키는 이 브라우저에만 저장됩니다.</div>
+      </div>
+      <div class="row" style="margin-bottom:16px">
+        <input type="text" id="ticker" placeholder="종목 코드 (예: AAPL, TSLA, MSFT)" style="flex:1;text-transform:uppercase">
+        <button onclick="loadStock()">조회</button>
+      </div>
+      <div id="stockResult" style="display:none">
+        <div class="stock-head">
+          <div class="price" id="stockPrice">-</div>
+          <div class="chg" id="stockChg">-</div>
+        </div>
+        <div class="meta" id="stockMeta"></div>
+        <canvas id="stockChart" height="90"></canvas>
+        <div id="easyBox" class="easy">
+          <div class="easy-title">🔰 쉬운 해석 (주린이용)</div>
+          <div id="easyOverall" class="easy-overall"></div>
+          <div id="easyList"></div>
+        </div>
+      </div>
+      <div class="hint" id="stockMsg"></div>
+    </div>
+
+    <!-- 월 지출 관리 -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#ff8fab"></span>월 지출 관리</h2>
+
+      <div class="row" style="margin-bottom:16px;align-items:center">
+        <label style="color:var(--muted);font-size:13px;font-weight:600">조회 월</label>
+        <input type="month" id="monthSel" onchange="loadMonth(this.value)" style="width:170px">
+        <span class="hint" style="margin:0">월을 바꾸면 그 달의 카드값·지출이 표시돼요. 정기지출은 자동 이월됩니다.</span>
+      </div>
+
+      <div class="exp-label" style="display:flex;justify-content:space-between;align-items:center">
+        <span>💳 카드값 (선택한 달의 청구액)</span>
+        <span>총액 <b id="cardTotalTop" style="color:#ff8fab;font-size:16px">0원</b></span>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <input type="number" id="cardDay" min="1" max="31" placeholder="결제일" style="width:80px">
+        <input type="text" id="cardName" placeholder="카드명 (예: 신한카드)" style="flex:1">
+        <input type="number" id="cardBill" placeholder="청구액(원)·선택" style="width:140px">
+        <button onclick="addCard()">추가</button>
+      </div>
+      <ul class="sched-list" id="cardList" style="margin-top:0;max-height:200px"></ul>
+
+      <div class="exp-divider"></div>
+
+      <div class="exp-label">🔁 정기지출 항목 (결제일 · 결제수단)</div>
+      <div class="row" style="margin-bottom:10px">
+        <input type="number" id="fxDay" min="1" max="31" placeholder="결제일" style="width:80px">
+        <input type="text" id="fxName" placeholder="항목명 (예: 넷플릭스, 통신비)" style="flex:1">
+        <input type="number" id="fxAmt" placeholder="금액(원)" style="width:120px">
+        <select id="fxMethod" style="width:130px"></select>
+        <button onclick="addFixed()">추가</button>
+      </div>
+      <ul class="sched-list" id="fxList" style="margin-top:0;max-height:300px"></ul>
+
+      <div class="exp-sum" id="expSum" style="margin-top:16px"></div>
+      <div class="hint">월 총지출 = 카드 청구액 합계 + 카드 외(계좌·현금) 정기지출. 카드로 내는 정기지출은 카드값에 이미 포함돼 중복 계산되지 않습니다.</div>
+    </div>
+  </div>
+
+<script>
+/* ===== 공통 ===== */
+const $ = id => document.getElementById(id);
+$("today").textContent = new Date().toLocaleDateString("ko-KR",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+
+/* ===== 백업 / 복원 ===== */
+function backupData(){
+  const data={};
+  for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);data[k]=localStorage.getItem(k);}
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="dashboard-backup-"+new Date().toISOString().slice(0,10)+".json";
+  a.click();
+}
+function restoreData(input){
+  const f=input.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const data=JSON.parse(r.result);
+      Object.keys(data).forEach(k=>localStorage.setItem(k,data[k]));
+      expData=JSON.parse(localStorage.getItem("expData")||"{}");
+      scheds=JSON.parse(localStorage.getItem("scheds")||"[]");
+      renderScheds();renderEye();loadMonth(curMonth);
+      alert("복원 완료! 데이터를 되살렸습니다.");
+    }catch(e){alert("복원 실패: 올바른 백업 파일인지 확인하세요.");}
+  };
+  r.readAsText(f);
+  input.value="";
+}
+
+/* ===== 자동 기록 (폴더 내 파일에 실시간 저장) ===== */
+let fileHandle=null, fileState="off";
+// IndexedDB에 파일 핸들 보관 (새로고침·재시작해도 유지)
+function idb(){return new Promise((res,rej)=>{const r=indexedDB.open("dashDB",1);
+  r.onupgradeneeded=()=>r.result.createObjectStore("h");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function idbSet(k,v){const db=await idb();return new Promise((res,rej)=>{const tx=db.transaction("h","readwrite");tx.objectStore("h").put(v,k);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});}
+async function idbGet(k){const db=await idb();return new Promise((res,rej)=>{const tx=db.transaction("h","readonly");const q=tx.objectStore("h").get(k);q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});}
+
+async function verifyPerm(h,write){
+  const o={mode:write?"readwrite":"read"};
+  if((await h.queryPermission(o))==="granted")return true;
+  if((await h.requestPermission(o))==="granted")return true;
+  return false;
+}
+function collectAll(){const d={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);d[k]=localStorage.getItem(k);}return d;}
+async function autoSaveFile(){
+  if(!fileHandle||fileState!=="on")return;
+  try{
+    if((await fileHandle.queryPermission({mode:"readwrite"}))!=="granted"){setFileState("need");return;}
+    const w=await fileHandle.createWritable();
+    await w.write(JSON.stringify(collectAll(),null,2));
+    await w.close();
+  }catch(e){}
+}
+async function loadFromFile(){
+  const f=await fileHandle.getFile();const txt=await f.text();
+  if(!txt.trim())return false;
+  const data=JSON.parse(txt);
+  Object.keys(data).forEach(k=>localStorage.setItem(k,data[k]));
+  expData=JSON.parse(localStorage.getItem("expData")||"{}");
+  scheds=JSON.parse(localStorage.getItem("scheds")||"[]");
+  renderScheds();renderEye();loadMonth(curMonth);
+  return true;
+}
+function setFileState(s){
+  fileState=s;const btn=$("fileBtn"),st=$("fileStatus");
+  if(s==="on"){btn.textContent="🔗 자동 기록 켜짐";btn.onclick=connectFile;
+    st.textContent="✅ 추가·수정이 파일에 자동 저장됩니다";st.style.color="var(--accent2)";}
+  else if(s==="need"){btn.textContent="🔗 자동 기록 다시 연결";btn.onclick=reconnectFile;
+    st.textContent="⚠️ 연결 복구가 필요해요 (버튼 클릭)";st.style.color="#f5a623";}
+  else{btn.textContent="🔗 자동 기록 파일 연결";btn.onclick=connectFile;
+    st.textContent="파일에 자동 저장하려면 연결하세요";st.style.color="var(--muted)";}
+}
+async function connectFile(){
+  // file:// 로 열면 이 기능이 막혀 있음 → 안내
+  if(location.protocol==="file:"){
+    alert("⚠️ 지금은 파일을 더블클릭해서 연 상태(file://)라 자동 기록이 차단됩니다.\n\n자동 기록은 http 주소로 열어야 동작합니다. 아래 중 하나가 필요해요:\n1) GitHub Pages 등에 올려서 열기 (무료)\n2) 로컬 서버로 열기\n\n지금은 브라우저 자동저장이 되고 있고, '백업' 버튼으로 파일 저장도 됩니다.");
+    return;
+  }
+  if(!window.showSaveFilePicker){alert("이 브라우저는 파일 자동 기록을 지원하지 않아요. 최신 크롬/엣지에서 사용하세요.");return;}
+  try{
+    const h=await window.showSaveFilePicker({suggestedName:"dashboard-data.json",
+      types:[{description:"JSON",accept:{"application/json":[".json"]}}]});
+    fileHandle=h;
+    try{await idbSet("dataFile",h);}catch(e){alert("핸들 저장 실패(다음 실행 때 재연결 필요): "+e.message);}
+    const f=await h.getFile();const txt=await f.text();
+    if(txt.trim()){
+      if(confirm("이 파일에 기존 데이터가 있어요.\n확인=파일 내용 불러오기 / 취소=현재 화면 데이터로 덮어쓰기")){
+        fileState="on";await loadFromFile();
+      }else{fileState="on";await autoSaveFile();}
+    }else{fileState="on";await autoSaveFile();}
+    setFileState("on");
+    alert("연결 완료! 이제 추가·수정하면 이 파일에 자동으로 기록됩니다.");
+  }catch(e){
+    if(e.name==="AbortError")return; // 사용자가 취소
+    alert("연결 실패: "+e.name+" — "+e.message);
+    setFileState("off");
+  }
+}
+async function reconnectFile(){
+  if(!fileHandle){setFileState("off");return;}
+  if(await verifyPerm(fileHandle,true)){fileState="on";await loadFromFile();setFileState("on");}
+}
+async function initFileSync(){
+  try{
+    const h=await idbGet("dataFile");
+    if(!h){setFileState("off");return;}
+    fileHandle=h;
+    if((await h.queryPermission({mode:"readwrite"}))==="granted"){
+      fileState="on";await loadFromFile();setFileState("on");
+    }else{setFileState("need");}
+  }catch(e){setFileState("off");}
+}
+
+/* ===== 타이머 ===== */
+let total = 2*60, remain = total, tick = null, running = false;
+function fmt(s){
+  const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
+  const p=n=>String(n).padStart(2,"0");
+  return (h>0?p(h)+":":"")+p(m)+":"+p(x);
+}
+function render(){$("timerDisplay").textContent = fmt(remain);}
+function setTimer(min){pauseTimer();total=remain=min*60;render();}
+function setTimerCustom(){
+  const h=parseInt($("customH").value)||0;
+  const m=parseInt($("customM").value)||0;
+  const s=parseInt($("customS").value)||0;
+  const secs=h*3600+m*60+s;
+  if(secs>0){pauseTimer();total=remain=secs;render();}
+}
+function toggleTimer(){running?pauseTimer():startTimer();}
+function startTimer(){
+  if(remain<=0)return;
+  running=true;$("startBtn").textContent="일시정지";
+  tick=setInterval(()=>{
+    remain--;render();
+    if(remain<=0){clearInterval(tick);running=false;$("startBtn").textContent="시작";
+      playAlarm();setTimeout(()=>alert("타이머 종료!"),100);}
+  },1000);
+}
+function playAlarm(){
+  try{
+    const ac=new (window.AudioContext||window.webkitAudioContext)();
+    // 삐- 소리 5회 반복
+    for(let i=0;i<5;i++){
+      const t=ac.currentTime+i*0.6;
+      const osc=ac.createOscillator(), g=ac.createGain();
+      osc.type="sine";osc.frequency.value=880;
+      osc.connect(g);g.connect(ac.destination);
+      g.gain.setValueAtTime(0.001,t);
+      g.gain.exponentialRampToValueAtTime(0.4,t+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001,t+0.4);
+      osc.start(t);osc.stop(t+0.42);
+    }
+  }catch(e){}
+}
+function pauseTimer(){clearInterval(tick);running=false;$("startBtn").textContent="시작";}
+function resetTimer(){pauseTimer();remain=total;render();}
+render();
+
+/* ===== 스케줄러 (localStorage) ===== */
+let scheds = JSON.parse(localStorage.getItem("scheds")||"[]");
+function saveScheds(){localStorage.setItem("scheds",JSON.stringify(scheds));autoSaveFile();}
+function renderScheds(){
+  scheds.sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  $("schedList").innerHTML = scheds.map((s,i)=>`
+    <li class="sched-item ${s.done?'done':''}">
+      <input type="checkbox" ${s.done?'checked':''} onchange="toggleSched(${i})">
+      <span class="time">${s.time||''}</span>
+      <span class="txt">${s.text.replace(/</g,'&lt;')}</span>
+      <button class="del" onclick="delSched(${i})">✕</button>
+    </li>`).join("") || '<div class="hint">등록된 일정이 없습니다.</div>';
+}
+function addSched(){
+  const text=$("schedText").value.trim();if(!text)return;
+  scheds.push({time:$("schedTime").value,text,done:false});
+  $("schedText").value="";$("schedTime").value="";
+  saveScheds();renderScheds();
+}
+function toggleSched(i){scheds[i].done=!scheds[i].done;saveScheds();renderScheds();}
+function delSched(i){scheds.splice(i,1);saveScheds();renderScheds();}
+$("schedText").addEventListener("keydown",e=>{if(e.key==="Enter")addSched();});
+renderScheds();
+
+/* ===== 안약 복용 (날짜별, 매일 자동 초기화) ===== */
+const EYE_ITEMS=[
+  {sec:"am",name:"코솝"},{sec:"am",name:"알파간"},
+  {sec:"pm",name:"코솝"},{sec:"pm",name:"알파간"}
+];
+function eyeKey(){return "eye_"+new Date().toLocaleDateString("sv-SE");} // YYYY-MM-DD
+function loadEye(){return JSON.parse(localStorage.getItem(eyeKey())||"[false,false,false,false]");}
+function saveEye(a){localStorage.setItem(eyeKey(),JSON.stringify(a));autoSaveFile();}
+function renderEye(){
+  const st=loadEye();
+  const rows=(sec)=>EYE_ITEMS.map((it,i)=>it.sec===sec?`
+    <li class="sched-item ${st[i]?'done':''}">
+      <input type="checkbox" ${st[i]?'checked':''} onchange="toggleEye(${i})">
+      <span class="txt">${it.name}</span>
+    </li>`:"").join("");
+  $("eyeAM").innerHTML=rows("am");
+  $("eyePM").innerHTML=rows("pm");
+  $("eyeCount").textContent=st.filter(Boolean).length+" / 4 완료";
+  $("eyeDate").textContent=new Date().toLocaleDateString("ko-KR")+" 기준";
+}
+function toggleEye(i){const st=loadEye();st[i]=!st[i];saveEye(st);renderEye();}
+function resetEye(){saveEye([false,false,false,false]);renderEye();}
+renderEye();
+
+/* ===== 월 지출 관리 (월별 저장 + 년/월 조회 + 계산포함 체크) ===== */
+const wonKR=n=>Math.round(n).toLocaleString("ko-KR")+"원";
+const esc=s=>s.replace(/</g,"&lt;");
+let expData=JSON.parse(localStorage.getItem("expData")||"{}");
+let curMonth=localStorage.getItem("curMonth")||new Date().toISOString().slice(0,7); // YYYY-MM
+let cards=[], fixed=[];
+
+// 기존(월 구분 없던) 데이터 이월
+if(!expData[curMonth] && (localStorage.getItem("cards")||localStorage.getItem("fixed"))){
+  expData[curMonth]={
+    cards:JSON.parse(localStorage.getItem("cards")||"[]"),
+    fixed:JSON.parse(localStorage.getItem("fixed")||"[]")
+  };
+  localStorage.setItem("expData",JSON.stringify(expData));
+}
+function saveExpData(){expData[curMonth]={cards,fixed};localStorage.setItem("expData",JSON.stringify(expData));autoSaveFile();}
+
+function loadMonth(m){
+  if(!m)return;
+  curMonth=m; localStorage.setItem("curMonth",m);
+  if(expData[m]){cards=expData[m].cards; fixed=expData[m].fixed;}
+  else{
+    // 직전(가장 최근 이전) 달에서 정기지출·카드 이월 (청구액은 0으로 초기화)
+    const prev=Object.keys(expData).filter(k=>k<m).sort().pop();
+    if(prev){
+      cards=expData[prev].cards.map(c=>({name:c.name,day:c.day,bill:0,inc:c.inc!==false}));
+      fixed=JSON.parse(JSON.stringify(expData[prev].fixed));
+    }else{cards=[];fixed=[];}
+    saveExpData();
+  }
+  $("monthSel").value=curMonth;
+  renderExpAll();
+}
+
+// 카드
+function addCard(){
+  const name=$("cardName").value.trim();
+  const bill=parseFloat($("cardBill").value)||0;
+  const day=parseInt($("cardDay").value)||0;
+  if(!name)return;
+  const ex=cards.find(c=>c.name===name);
+  if(ex){ex.bill=bill;ex.day=day;} else cards.push({name,bill,day,inc:true});
+  $("cardName").value="";$("cardBill").value="";$("cardDay").value="";
+  saveExpData();renderExpAll();
+}
+function editCard(i){$("cardName").value=cards[i].name;$("cardBill").value=cards[i].bill;$("cardDay").value=cards[i].day||"";cards.splice(i,1);saveExpData();renderExpAll();}
+function delCard(i){const nm=cards[i].name;cards.splice(i,1);fixed.forEach(f=>{if(f.method===nm)f.method="계좌/현금";});saveExpData();renderExpAll();}
+function toggleCard(i){cards[i].inc=!cards[i].inc;saveExpData();renderExpAll();}
+
+// 정기지출
+function addFixed(){
+  const name=$("fxName").value.trim();
+  const amt=parseFloat($("fxAmt").value)||0;
+  const day=parseInt($("fxDay").value)||0;
+  const method=$("fxMethod").value||"계좌/현금";
+  if(!name||amt<=0)return;
+  fixed.push({name,amt,day,method});
+  $("fxName").value="";$("fxAmt").value="";$("fxDay").value="";
+  saveExpData();renderExpAll();
+}
+function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value=f.amt;$("fxDay").value=f.day||"";buildMethodOptions(f.method);fixed.splice(i,1);saveExpData();renderExpAll();}
+function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
+
+function buildMethodOptions(sel){
+  const opts=["계좌/현금",...cards.map(c=>c.name)];
+  $("fxMethod").innerHTML=opts.map(o=>`<option ${o===sel?"selected":""}>${o}</option>`).join("");
+}
+
+function renderExpAll(){
+  const keepSel=$("fxMethod").value;
+  buildMethodOptions(keepSel);
+
+  // 카드 리스트 (왼쪽 체크박스로 계산 포함/제외, 정기 포함분·기타분 표시)
+  $("cardList").innerHTML=cards.map((c,i)=>{
+    const on=c.inc!==false;
+    const inc=fixed.filter(f=>f.method===c.name).reduce((s,f)=>s+f.amt,0);
+    const etc=c.bill-inc;
+    return `<li class="sched-item" style="${on?'':'opacity:.5'}">
+      <input type="checkbox" ${on?'checked':''} onchange="toggleCard(${i})" title="월 총지출 계산 포함">
+      <span class="time">${c.day?c.day+"일":"-"}</span>
+      <span class="txt">${esc(c.name)} <span style="color:var(--muted);font-size:12px">· 정기 ${wonKR(inc)} + 기타 ${wonKR(etc)}</span></span>
+      <span class="exp-amt">${wonKR(c.bill)}</span>
+      <button class="exp-edit" onclick="editCard(${i})">수정</button>
+      <button class="del" onclick="delCard(${i})">✕</button>
+    </li>`;
+  }).join("")||'<div class="hint">등록된 카드가 없습니다.</div>';
+
+  // 정기지출 리스트 (결제일 순 정렬, 날짜·결제수단 표시)
+  const order=[...fixed.keys()].sort((a,b)=>((fixed[a].day||99)-(fixed[b].day||99)));
+  $("fxList").innerHTML=order.map(i=>{const f=fixed[i];const isCard=f.method!=="계좌/현금";
+    return `<li class="sched-item">
+      <span class="time">${f.day?f.day+"일":"-"}</span>
+      <span class="txt">${esc(f.name)}</span>
+      <span class="exp-tag ${isCard?"card":""}">${esc(f.method)}</span>
+      <span class="exp-amt">${wonKR(f.amt)}</span>
+      <button class="exp-edit" onclick="editFixed(${i})">수정</button>
+      <button class="del" onclick="delFixed(${i})">✕</button>
+    </li>`;
+  }).join("")||'<div class="hint">등록된 정기지출이 없습니다.</div>';
+
+  // 요약 (체크된 카드만 합산, 중복 방지)
+  const cardTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>s+c.bill,0);
+  $("cardTotalTop").textContent=wonKR(cardTotal);
+  const nonCardFixed=fixed.filter(f=>f.method==="계좌/현금").reduce((s,f)=>s+f.amt,0);
+  $("expSum").innerHTML=`
+    <div class="exp-box"><div class="lbl">카드 청구액(체크분)</div><div class="num">${wonKR(cardTotal)}</div></div>
+    <div class="exp-box"><div class="lbl">카드 외 정기지출</div><div class="num">${wonKR(nonCardFixed)}</div></div>
+    <div class="exp-box total"><div class="lbl">${curMonth} 월 총지출</div><div class="num">${wonKR(cardTotal+nonCardFixed)}</div></div>`;
+}
+$("cardBill").addEventListener("keydown",e=>{if(e.key==="Enter")addCard();});
+$("fxAmt").addEventListener("keydown",e=>{if(e.key==="Enter")addFixed();});
+loadMonth(curMonth);
+
+/* ===== 매매 계산기 (본전가 · 목표가) ===== */
+function won(n){return Math.round(n).toLocaleString("ko-KR")+"원";}
+function calcTrade(){
+  const P=parseFloat($("calcBuy").value);
+  const c=(parseFloat($("calcFee").value)||0)/100;      // 편도 수수료율
+  const t=$("calcType").value==="etf"?0:0.002;          // 증권거래세(ETF 면제)
+  const out=$("calcOut");
+  if(!P||P<=0){out.style.display="block";out.innerHTML='<div class="easy-n">매수가를 입력하세요.</div>';return;}
+  const denom=1-c-t;
+  const bep=P*(1+c)/denom;              // 본전 매도가
+  const bepRise=(bep/P-1)*100;          // 본전 상승률
+  const invested=P*(1+c);               // 수수료 포함 매수 원가
+  const rows=[
+    ["본전 매도가", won(bep), `여기서 팔면 수수료·세금 빼고 <b>손익 0</b>. 즉 최소 <b>+${bepRise.toFixed(2)}%</b>는 올라야 본전이에요.`],
+    ["매수 원가", won(invested), "매수가 + 매수수수료 (실제 들어간 돈)"]
+  ];
+  const r=parseFloat($("calcTarget").value);
+  if(r>0){
+    const target=P*(1+c)*(1+r/100)/denom;
+    const targetRise=(target/P-1)*100;
+    rows.push(["목표 매도가", won(target),
+      `순수익 <b>+${r}%</b>를 남기려면 이 가격에 팔아야 해요. (매수가 대비 <b>+${targetRise.toFixed(2)}%</b>)`]);
+  }
+  out.style.display="block";
+  out.innerHTML='<div class="easy-title">💰 계산 결과 ('+($("calcType").value==="etf"?"ETF":"주식")+')</div>'
+    + rows.map(x=>`<div class="easy-row"><div class="easy-k">${x[0]}</div><div class="easy-v">${x[1]}</div><div class="easy-n">${x[2]}</div></div>`).join("");
+}
+
+/* ===== 주식 (Finnhub) ===== */
+let chart=null;
+$("apiKey").value = localStorage.getItem("finnhubKey")||"";
+$("apiKey").addEventListener("change",e=>localStorage.setItem("finnhubKey",e.target.value.trim()));
+$("ticker").addEventListener("keydown",e=>{if(e.key==="Enter")loadStock();});
+
+async function loadStock(){
+  const key=$("apiKey").value.trim();
+  const sym=$("ticker").value.trim().toUpperCase();
+  const msg=$("stockMsg");
+  if(!key){msg.textContent="먼저 Finnhub API 키를 입력하세요.";return;}
+  if(!sym){msg.textContent="종목 코드를 입력하세요.";return;}
+  localStorage.setItem("finnhubKey",key);
+  msg.textContent="불러오는 중...";
+  try{
+    // 현재가
+    const q=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${key}`).then(r=>r.json());
+    if(q.c===0&&q.pc===0){msg.textContent="데이터가 없습니다. 종목 코드를 확인하세요.";$("stockResult").style.display="none";return;}
+    const chg=q.c-q.pc, pct=(chg/q.pc*100);
+    const up=chg>=0;
+    $("stockPrice").textContent="$"+q.c.toFixed(2);
+    $("stockChg").textContent=(up?"▲ +":"▼ ")+chg.toFixed(2)+" ("+pct.toFixed(2)+"%)";
+    $("stockChg").className="chg "+(up?"up":"down");
+    $("stockMeta").textContent=`고가 $${q.h.toFixed(2)} · 저가 $${q.l.toFixed(2)} · 시가 $${q.o.toFixed(2)} · 전일종가 $${q.pc.toFixed(2)}`;
+    $("stockResult").style.display="block";
+    msg.textContent="";
+    drawSimple(sym,q);
+    // 기업 지표(PER 등) 추가 조회 후 쉬운 해석 렌더
+    let metric={};
+    try{
+      const m=await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${sym}&metric=all&token=${key}`).then(r=>r.json());
+      metric=m.metric||{};
+    }catch(e){}
+    renderEasy(sym,q,metric,up,pct);
+  }catch(err){msg.textContent="오류가 발생했습니다. 키 또는 네트워크를 확인하세요.";}
+}
+
+/* ===== 쉬운 해석 (주린이용) ===== */
+function renderEasy(sym,q,m,up,pct){
+  // 종합 한 줄
+  const dayRange=q.h-q.l;
+  const posInDay=dayRange>0?((q.c-q.l)/dayRange*100):50;
+  let overall=`오늘 <b>${sym}</b>은(는) 전일보다 <b>${up?"올랐어요 ▲":"내렸어요 ▼"}</b> (${pct.toFixed(2)}%). `;
+  overall+= posInDay>66?"오늘 움직인 범위 중 <b>높은 쪽</b>에 있어요(장중 강세).":
+            posInDay<33?"오늘 움직인 범위 중 <b>낮은 쪽</b>에 있어요(장중 약세).":
+            "오늘 움직인 범위의 <b>가운데쯤</b>에 있어요.";
+  $("easyOverall").innerHTML=overall;
+
+  const rows=[];
+  // rel: "high"|"mid"|"low"
+  const add=(k,v,rel,n)=>rows.push({k,v,rel,n});
+
+  // 오늘 변동폭
+  const volPct=q.pc>0?(dayRange/q.pc*100):0;
+  add("오늘 변동폭", `$${dayRange.toFixed(2)}`, "low",
+    `하루 안에서 고가와 저가 차이예요. 전일가의 ${volPct.toFixed(1)}% ${volPct>4?"→ 오늘 꽤 출렁였어요.":"→ 비교적 잔잔했어요."} 미래 예측력은 약해요.`);
+
+  // PER
+  const per=m.peBasicExclExtraTTM ?? m.peNormalizedAnnual ?? m.peTTM;
+  if(per!=null) add("PER", per.toFixed(1), "mid",
+    `"버는 돈에 비해 주가가 비싼가"예요. ${per<10?"낮은 편 → 상대적으로 저렴.":per<25?"보통 수준.":"높은 편 → 기대가 크거나 비쌈."} 적자·일시이익 땐 왜곡되니 같은 업종과 비교하세요.`);
+
+  // PBR
+  const pbr=m.pbQuarterly ?? m.pbAnnual;
+  if(pbr!=null) add("PBR", pbr.toFixed(2), "mid",
+    `"회사 재산에 비해 주가가 비싼가"예요. ${pbr<1?"1 미만 → 재산보다 싸게 거래(저평가 신호로 보기도).":"1 이상 → 재산보다 비싸게 거래."} 자산 많은 업종엔 유용, IT·서비스엔 부정확.`);
+
+  // ROE
+  const roe=m.roeTTM ?? m.roeRfy;
+  if(roe!=null) add("ROE", roe.toFixed(1)+"%", "high",
+    `"자기 돈으로 얼마나 잘 버느냐"예요. ${roe>=15?"높음 → 돈을 효율적으로 잘 버는 회사.":roe>=8?"양호한 편.":"낮은 편 → 수익 효율이 아쉬움."} 단, 빚 많으면 부풀려지니 부채와 함께 보세요.`);
+
+  // 52주 고저 대비 위치
+  const hi=m["52WeekHigh"], lo=m["52WeekLow"];
+  if(hi!=null&&lo!=null&&hi>lo){
+    const pos=((q.c-lo)/(hi-lo)*100);
+    add("1년 위치", pos.toFixed(0)+"%", "low",
+      `1년 최저(${lo.toFixed(0)})~최고(${hi.toFixed(0)}) 중 지금 위치예요. ${pos>70?"고점 근처.":pos<30?"저점 근처.":"중간쯤."} 싸다고 반등 보장은 없어요(참고용).`);
+  }
+
+  // 배당수익률
+  const div=m.dividendYieldIndicatedAnnual ?? m.currentDividendYieldTTM;
+  if(div!=null) add("배당수익률", div.toFixed(2)+"%", "high",
+    `주가 대비 1년 배당이에요. ${div>=3?"은행 이자처럼 배당이 쏠쏠한 편.":div>0?"배당이 조금 있어요.":"배당이 거의 없어요."} 주가 급락 시 높아 보이는 착시 주의.`);
+
+  const badge=rel=>({high:'<span class="badge b-high">신뢰도 높음</span>',
+                     mid:'<span class="badge b-mid">신뢰도 중간</span>',
+                     low:'<span class="badge b-low">참고용</span>'}[rel]||"");
+
+  $("easyList").innerHTML = rows.map(r=>`
+    <div class="easy-row">
+      <div class="easy-k">${r.k}${badge(r.rel)}</div>
+      <div class="easy-v">${r.v}</div>
+      <div class="easy-n">${r.n}</div>
+    </div>`).join("") ||
+    '<div class="easy-n">이 종목의 상세 지표(PER 등)는 무료 플랜에서 제공되지 않을 수 있어요. 위 종합 해석을 참고하세요.</div>';
+}
+
+// 무료 플랜은 과거 시세(candle)가 제한될 수 있어, 당일 4개 지표로 막대차트를 그립니다.
+function drawSimple(sym,q){
+  const ctx=$("stockChart").getContext("2d");
+  if(chart)chart.destroy();
+  chart=new Chart(ctx,{
+    type:"bar",
+    data:{labels:["시가","고가","저가","현재가"],
+      datasets:[{data:[q.o,q.h,q.l,q.c],
+        backgroundColor:["#4f8cff","#33d69f","#ff5c72","#f5a623"],borderRadius:6}]},
+    options:{plugins:{legend:{display:false},title:{display:true,text:sym+" 당일 지표",color:"#8b97ad"}},
+      scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
+              x:{ticks:{color:"#8b97ad"},grid:{display:false}}}}
+  });
+}
+
+/* ===== 자동 기록 초기화 (마지막에 실행) ===== */
+$("apiKey").addEventListener("change",()=>autoSaveFile());
+initFileSync();
+</script>
+</body>
+</html>
