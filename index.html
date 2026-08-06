@@ -678,9 +678,8 @@ async function loadStockKR(silent){
       lastFinanceKR=(d.roe!=null||d.debtRatio!=null)?{roe:d.roe,debtRatio:d.debtRatio}:null;
       renderEasyKR(d,up);
       if(d.candles&&d.candles.length>1)drawDailyKR(d.candles,nm);else drawSimpleKR(d);
-    }else{
-      renderEasyKR(d,up); // 실시간: 헤더·해석만 갱신(차트 유지)
     }
+    // 실시간(silent) 갱신 때는 헤더 현재가만 갱신하고, 해석·차트는 마지막 수동조회 상태 유지
   }catch(e){msg.textContent="프록시 연결 실패. Vercel 배포와 환경변수를 확인하세요.";}
 }
 function drawSimpleKR(d){
@@ -717,12 +716,22 @@ function renderEasyKR(d,up){
   const rows=[]; const add=(k,v,rel,n)=>rows.push({k,v,rel,n});
   const volPct=d.prevClose>0?(range/d.prevClose*100):0;
   add("오늘 변동폭",won(range),"low",`하루 고가-저가 차이. 전일가의 ${volPct.toFixed(1)}% ${volPct>4?"→ 꽤 출렁였어요.":"→ 잔잔했어요."}`);
-  if(d.marketCap!=null) add("시가총액",(d.marketCap>=10000?(d.marketCap/10000).toFixed(1)+"조":d.marketCap.toLocaleString()+"억"),"low","회사 전체 가치(규모). 클수록 대형주로 대체로 안정적.");
-  if(d.per!=null) add("PER",d.per.toFixed(1),"mid",`버는 돈 대비 주가. ${d.per<10?"낮은 편→저렴.":d.per<25?"보통.":"높은 편→기대 크거나 비쌈."} 같은 업종과 비교하세요.`);
-  if(d.pbr!=null) add("PBR",d.pbr.toFixed(2),"mid",`재산 대비 주가. ${d.pbr<1?"1 미만→재산보다 싸게 거래.":"1 이상→재산보다 비싸게."}`);
-  if(lastFinanceKR&&lastFinanceKR.roe!=null) add("ROE",lastFinanceKR.roe.toFixed(1)+"%","high",`자기 돈으로 얼마나 잘 버느냐. ${lastFinanceKR.roe>=15?"높음→효율 좋은 회사.":lastFinanceKR.roe>=8?"양호.":"낮은 편."} 부채와 함께 보세요.`);
-  if(lastFinanceKR&&lastFinanceKR.debtRatio!=null) add("부채비율",lastFinanceKR.debtRatio.toFixed(0)+"%","high",`빚이 자기자본 대비 얼마나 되나. ${lastFinanceKR.debtRatio<100?"100% 미만→재무 안정적.":lastFinanceKR.debtRatio<200?"보통 수준.":"높은 편→부담 큼."}`);
-  if(d.eps!=null) add("EPS",won(d.eps),"mid","1주당 순이익. 매년 늘면 성장 중이라는 뜻.");
+
+  if(d.isEtf){
+    // --- ETF 전용 지표 ---
+    if(d.nav!=null) add("NAV",won(d.nav),"high","순자산가치(1주당 실제 담고 있는 자산). 이 값이 ETF의 '진짜 가격'이에요.");
+    if(d.disparity!=null) add("괴리율",(d.disparity>0?"+":"")+d.disparity.toFixed(2)+"%","mid",`시장가가 NAV보다 ${d.disparity>0?"비쌈(고평가)":"쌈(저평가)"}. 0%에 가까울수록 적정. ${Math.abs(d.disparity)>1?"±1% 넘어 유의.":"정상 범위."}`);
+    if(d.marketCap!=null) add("순자산(규모)",(d.marketCap>=10000?(d.marketCap/10000).toFixed(1)+"조":d.marketCap.toLocaleString()+"억"),"low","ETF 전체 크기. 클수록 상장폐지 위험 낮고 안정적.");
+    if(d.volume!=null) add("거래량",d.volume.toLocaleString()+"주","low","오늘 거래된 수량. 많을수록 사고팔기 쉬움(유동성).");
+  }else{
+    // --- 개별주식 지표 ---
+    if(d.marketCap!=null) add("시가총액",(d.marketCap>=10000?(d.marketCap/10000).toFixed(1)+"조":d.marketCap.toLocaleString()+"억"),"low","회사 전체 가치(규모). 클수록 대형주로 대체로 안정적.");
+    if(d.per!=null) add("PER",d.per.toFixed(1),"mid",`버는 돈 대비 주가. ${d.per<10?"낮은 편→저렴.":d.per<25?"보통.":"높은 편→기대 크거나 비쌈."} 같은 업종과 비교하세요.`);
+    if(d.pbr!=null) add("PBR",d.pbr.toFixed(2),"mid",`재산 대비 주가. ${d.pbr<1?"1 미만→재산보다 싸게 거래.":"1 이상→재산보다 비싸게."}`);
+    if(lastFinanceKR&&lastFinanceKR.roe!=null) add("ROE",lastFinanceKR.roe.toFixed(1)+"%","high",`자기 돈으로 얼마나 잘 버느냐. ${lastFinanceKR.roe>=15?"높음→효율 좋은 회사.":lastFinanceKR.roe>=8?"양호.":"낮은 편."} 부채와 함께 보세요.`);
+    if(lastFinanceKR&&lastFinanceKR.debtRatio!=null) add("부채비율",lastFinanceKR.debtRatio.toFixed(0)+"%","high",`빚이 자기자본 대비 얼마나 되나. ${lastFinanceKR.debtRatio<100?"100% 미만→재무 안정적.":lastFinanceKR.debtRatio<200?"보통 수준.":"높은 편→부담 큼."}`);
+    if(d.eps!=null) add("EPS",won(d.eps),"mid","1주당 순이익. 매년 늘면 성장 중이라는 뜻.");
+  }
   if(d.w52high!=null&&d.w52low!=null&&d.w52high>d.w52low){
     const p=((d.price-d.w52low)/(d.w52high-d.w52low)*100);
     add("1년 위치",p.toFixed(0)+"%","low",`1년 최저(${d.w52low.toLocaleString()})~최고(${d.w52high.toLocaleString()}) 중 지금. ${p>70?"고점 근처.":p<30?"저점 근처.":"중간쯤."}`);

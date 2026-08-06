@@ -125,15 +125,32 @@ async function getFinance(symbol) {
   };
 }
 
-// 한 번의 호출로 현재가+종목명+일별차트+재무를 모두 반환 (토큰 1개 공유 → 발급제한 회피)
+async function getEtf(symbol) {
+  const token = await getToken();
+  const url =
+    BASE + "/uapi/etfetn/v1/quotations/inquire-price" +
+    "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol;
+  const j = await (await fetch(url, { headers: headers(token, "FHPST02400000") })).json();
+  const o = j.output || {};
+  return { nav: num(o.nav), navRate: num(o.nav_prdy_ctrt) };
+}
+
+// 한 번의 호출로 현재가+종목명+일별차트+(주식:재무 / ETF:NAV)를 모두 반환 (토큰 1개 공유)
 async function getFull(symbol) {
   const p = await getPrice(symbol);          // 토큰 최초 발급(캐시)
   if (p.error) return p;
   let name = p.name, candles = [];
   try { const dd = await getDaily(symbol); name = dd.name || name; candles = dd.candles; } catch (e) {}
+  const isEtf = p.per === 0 && p.pbr === 0;   // ETF는 PER·PBR이 0
+  if (isEtf) {
+    let nav = null, navRate = null;
+    try { const e = await getEtf(symbol); nav = e.nav; navRate = e.navRate; } catch (err) {}
+    const disparity = nav && p.price ? ((p.price - nav) / nav) * 100 : null; // 괴리율
+    return { ...p, name, candles, isEtf: true, nav, navRate, disparity };
+  }
   let roe = null, debtRatio = null;
   try { const f = await getFinance(symbol); if (f && !f.error) { roe = f.roe; debtRatio = f.debtRatio; } } catch (e) {}
-  return { ...p, name, candles, roe, debtRatio };
+  return { ...p, name, candles, isEtf: false, roe, debtRatio };
 }
 
 module.exports = async function handler(req, res) {
