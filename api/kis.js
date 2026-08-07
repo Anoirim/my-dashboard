@@ -91,22 +91,32 @@ async function getPrice(symbol) {
   };
 }
 
-async function getDaily(symbol) {
+// 일봉은 1회 응답이 약 100건(5개월)으로 잘려서, 긴 기간은 3개월씩 나눠 받아 합친다.
+async function getDaily(symbol, from, to) {
   const token = await getToken();
-  const end = new Date();
-  const start = new Date(); start.setMonth(start.getMonth() - 5); // 약 5개월
-  const url =
-    BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice" +
-    "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol +
-    "&FID_INPUT_DATE_1=" + ymd(start) + "&FID_INPUT_DATE_2=" + ymd(end) +
-    "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
-  const j = await (await fetch(url, { headers: headers(token, "FHKST03010100") })).json();
-  const arr = j.output2 || [];
-  const name = (j.output1 && (j.output1.hts_kor_isnm || j.output1.prdt_name)) || null; // 종목명
-  const candles = arr
-    .filter((x) => x.stck_bsop_date && x.stck_clpr)
-    .map((x) => ({ date: x.stck_bsop_date, close: num(x.stck_clpr), vol: num(x.acml_vol) }))
-    .sort((a, b) => a.date.localeCompare(b.date)); // 과거→최근
+  if (!/^\d{8}$/.test(from || "") || !/^\d{8}$/.test(to || "")) {
+    const end = new Date();
+    const start = new Date(); start.setMonth(start.getMonth() - 5); // 기본 약 5개월
+    from = ymd(start); to = ymd(end);
+  }
+  let name = null;
+  const map = {};
+  const periods = splitPeriods(from, to);
+  for (let i = 0; i < periods.length; i++) {
+    if (i > 0) await sleep(120);
+    const url =
+      BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice" +
+      "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol +
+      "&FID_INPUT_DATE_1=" + periods[i][0] + "&FID_INPUT_DATE_2=" + periods[i][1] +
+      "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
+    const j = await (await fetch(url, { headers: headers(token, "FHKST03010100") })).json();
+    if (!name) name = (j.output1 && (j.output1.hts_kor_isnm || j.output1.prdt_name)) || null;
+    (j.output2 || []).forEach((x) => {
+      if (x.stck_bsop_date && x.stck_clpr)
+        map[x.stck_bsop_date] = { date: x.stck_bsop_date, close: num(x.stck_clpr), vol: num(x.acml_vol) };
+    });
+  }
+  const candles = Object.keys(map).sort().map((k) => map[k]); // 과거→최근
   return { name, candles };
 }
 
@@ -358,7 +368,7 @@ module.exports = async function handler(req, res) {
         daily_output1: dj.output1 || null,
       };
     }
-    else if (action === "daily") out = await getDaily(symbol);
+    else if (action === "daily") out = await getDaily(symbol, String(req.query.from || ""), String(req.query.to || ""));
     else if (action === "finance") out = await getFinance(symbol);
     else if (action === "quote") out = await getPrice(symbol);   // 실시간용(가벼움)
     else out = await getFull(symbol);                            // 기본: 전체(현재가+이름+차트+재무)

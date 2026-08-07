@@ -246,6 +246,17 @@
       <div id="tradesWrap" style="overflow-x:auto"></div>
     </div>
 
+    <!-- 자산 추이 -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#4f8cff"></span>자산 추이</h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <button onclick="loadEquity(event)">추이 만들기</button>
+        <span class="hint" id="eqMsg" style="margin:0">거래내역을 먼저 불러온 뒤 눌러주세요.</span>
+      </div>
+      <canvas id="eqChart" height="90"></canvas>
+      <div class="hint" id="eqNote" style="margin-top:10px"></div>
+    </div>
+
     <!-- 월 지출 관리 -->
     <div class="card full">
       <h2><span class="dot" style="background:#ff8fab"></span>월 지출 관리</h2>
@@ -1033,6 +1044,7 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const asset=evalSum+cash;
   const pnl=asset-invested;
   const rate=invested>0?(pnl/invested*100):0;
+  if(invested>0)saveSnapshot(asset,invested); // 오늘 값은 재구성보다 정확하므로 추이용으로 남긴다
   // .exp-box.total .num 이 색을 덮어써서 인라인으로 지정한다
   const c=pnl>=0?"var(--accent2)":"var(--danger)";
   box.innerHTML=`
@@ -1139,6 +1151,98 @@ function renderTrades(list){
     <summary class="hint" style="cursor:pointer">원본 응답 필드 보기</summary>
     <pre style="white-space:pre-wrap;font-size:11px;color:var(--muted);max-height:240px;overflow:auto">${esc(JSON.stringify(list[0],null,2))}</pre>
   </details>`;
+}
+
+/* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
+let eqChart=null;
+// 재구성은 배당·입출금을 모르니 근사치다. 실제로 본 값은 하루 1건 스냅샷으로 남겨 덮어쓴다.
+function saveSnapshot(asset,invested){
+  const s=JSON.parse(localStorage.getItem("equitySnap")||"{}");
+  s[new Date().toLocaleDateString("sv-SE")]={asset,invested};
+  localStorage.setItem("equitySnap",JSON.stringify(s));
+  autoSaveFile();
+}
+function tradeEvents(){
+  const out=[];
+  lastTrades.forEach(o=>{
+    const qty=parseFloat(pickTr(o,TR_F.qty))||0; if(!qty)return;
+    const price=parseFloat(pickTr(o,TR_F.price))||0;
+    const rawAmt=parseFloat(pickTr(o,TR_F.amt));
+    const cd=pickTr(o,TR_F.sideCode),nm=pickTr(o,TR_F.sideName);
+    const side=nm?String(nm):(cd==="01"?"매도":cd==="02"?"매수":"");
+    if(!side)return;
+    out.push({date:String(pickTr(o,TR_F.date)||""),code:String(pickTr(o,TR_F.code)||""),
+      sell:side.includes("매도"),qty,amt:rawAmt>0?rawAmt:qty*price});
+  });
+  return out.sort((a,b)=>a.date.localeCompare(b.date));
+}
+async function loadEquity(ev){
+  const msg=$("eqMsg");
+  if(!lastTrades.length||!lastBal){msg.textContent="먼저 위 거래내역에서 '불러오기'를 실행하세요.";return;}
+  const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
+  try{
+    const evs=tradeEvents();
+    if(!evs.length){msg.textContent="체결내역이 없어 추이를 만들 수 없어요.";return;}
+    const codes=[...new Set(evs.map(e=>e.code).concat((lastBal.holdings||[]).map(h=>h.code)))].filter(Boolean);
+    const from=evs[0].date, to=new Date().toLocaleDateString("sv-SE").replace(/-/g,"");
+    const px={};
+    for(let i=0;i<codes.length;i++){ // 초당 제한 때문에 순차 조회
+      msg.textContent=`시세 불러오는 중... (${i+1}/${codes.length})`;
+      try{
+        const d=await fetch(KIS_PROXY+"?action=daily&symbol="+codes[i]+"&from="+from+"&to="+to).then(x=>x.json());
+        px[codes[i]]={};(d.candles||[]).forEach(c=>{px[codes[i]][c.date]=c.close;});
+      }catch(e){}
+      await new Promise(s=>setTimeout(s,150));
+    }
+    const days=[...new Set(Object.values(px).flatMap(m=>Object.keys(m)))].sort().filter(d=>d>=from);
+    if(!days.length){msg.textContent="시세를 못 받아 추이를 만들 수 없어요.";return;}
+    const cash0=lastBal.cash||0;
+    const buyAll=evs.filter(e=>!e.sell).reduce((s,e)=>s+e.amt,0);
+    const sellAll=evs.filter(e=>e.sell).reduce((s,e)=>s+e.amt,0);
+    const invested=buyAll-sellAll+cash0; // 입출금이 없으면 기간 내내 일정하다
+    const hold={},lastPx={};
+    let ei=0,restBuy=buyAll,restSell=sellAll; // 해당 날짜 '이후'에 남은 매수·매도액
+    const assets=days.map(d=>{
+      while(ei<evs.length&&evs[ei].date<=d){
+        const e=evs[ei];
+        hold[e.code]=(hold[e.code]||0)+(e.sell?-e.qty:e.qty);
+        e.sell?restSell-=e.amt:restBuy-=e.amt;
+        ei++;
+      }
+      let stock=0;
+      Object.keys(hold).forEach(c=>{
+        if(!hold[c])return;
+        const p=(px[c]&&px[c][d])||lastPx[c]||0;
+        if(px[c]&&px[c][d])lastPx[c]=px[c][d];
+        stock+=hold[c]*p;
+      });
+      return stock+cash0+restBuy-restSell;
+    });
+    // 실제로 확인했던 날은 스냅샷 값이 정확하므로 우선한다
+    const snap=JSON.parse(localStorage.getItem("equitySnap")||"{}");
+    days.forEach((d,i)=>{const k=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);if(snap[k])assets[i]=snap[k].asset;});
+    drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,invested);
+    const cur=assets[assets.length-1],p=cur-invested;
+    $("eqNote").innerHTML=`원금 ${wonKR(invested)} · 현재 ${wonKR(cur)} · `
+      +`<b style="color:${p>=0?"var(--accent2)":"var(--danger)"}">${p>=0?"+":""}${wonKR(p)} (${(invested?p/invested*100:0).toFixed(2)}%)</b>`
+      +`<br>입출금이 없다고 보고 원금을 일정하게 그렸어요. 배당·추가입금이 있으면 실제와 달라집니다.`;
+    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`;
+  }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
+  finally{if(btn){btn.disabled=false;btn.style.opacity=1;}}
+}
+function drawEquity(labels,assets,invested){
+  const ctx=$("eqChart").getContext("2d");
+  if(eqChart)eqChart.destroy();
+  const up=assets[assets.length-1]>=invested;
+  eqChart=new Chart(ctx,{type:"line",
+    data:{labels,datasets:[
+      {label:"총자산",data:assets,borderColor:up?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,tension:.15},
+      {label:"투입 원금",data:labels.map(()=>invested),borderColor:"#8b97ad",borderDash:[6,4],borderWidth:1.5,pointRadius:0}
+    ]},
+    options:{plugins:{legend:{labels:{color:"#8b97ad"}}},
+      scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
+        x:{ticks:{color:"#8b97ad",maxTicksLimit:10},grid:{display:false}}}}
+  });
 }
 
 /* ===== 자동 기록 초기화 (마지막에 실행) ===== */
