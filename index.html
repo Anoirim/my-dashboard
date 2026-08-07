@@ -81,6 +81,7 @@
   .exp-label{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:600}
   .exp-divider{height:1px;background:var(--border);margin:18px 0}
   .exp-edit{color:var(--accent)!important;border:none;background:transparent;cursor:pointer;padding:4px 6px;font-size:13px}
+  .cat-tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(79,140,255,.15);color:var(--accent)}
   .drag{cursor:grab;color:var(--muted);user-select:none;font-size:14px;padding-right:2px}
   .drag:active{cursor:grabbing}
   .sched-item.drag-over{border-top:2px solid var(--accent)}
@@ -260,6 +261,11 @@
         <input type="number" id="fxDay" min="1" max="31" placeholder="결제일" style="width:80px">
         <input type="text" id="fxName" placeholder="항목명 (예: 넷플릭스, 통신비)" style="flex:1">
         <input type="number" id="fxAmt" placeholder="금액(원)" style="width:120px">
+        <select id="fxCat" style="width:120px">
+          <option>구독</option><option>보험</option><option>대출상환</option>
+          <option>통신</option><option>공과금</option><option>관리비</option>
+          <option>교통</option><option>기타</option>
+        </select>
         <select id="fxMethod" style="width:130px"></select>
         <button onclick="addFixed()">추가</button>
       </div>
@@ -535,12 +541,13 @@ function addFixed(){
   const amt=parseFloat($("fxAmt").value)||0;
   const day=parseInt($("fxDay").value)||0;
   const method=$("fxMethod").value||"계좌/현금";
+  const cat=$("fxCat").value||"기타";
   if(!name||amt<=0)return;
-  fixed.push({name,amt,day,method});
+  fixed.push({name,amt,day,method,cat});
   $("fxName").value="";$("fxAmt").value="";$("fxDay").value="";
   saveExpData();renderExpAll();
 }
-function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value=f.amt;$("fxDay").value=f.day||"";buildMethodOptions(f.method);fixed.splice(i,1);saveExpData();renderExpAll();}
+function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value=f.amt;$("fxDay").value=f.day||"";if(f.cat)$("fxCat").value=f.cat;buildMethodOptions(f.method);fixed.splice(i,1);saveExpData();renderExpAll();}
 function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
 
 function buildMethodOptions(sel){
@@ -600,12 +607,12 @@ function renderExpAll(){
     </li>`;
   }).join("")||'<div class="hint">등록된 카드가 없습니다.</div>';
 
-  // 정기지출 리스트 (사용자 지정 순서, 드래그로 변경)
-  $("fxList").innerHTML=fixed.map((f,i)=>{const isCard=f.method!=="계좌/현금";
-    return `<li class="sched-item" draggable="true"
-      ondragstart="dndStart('fixed',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('fixed',${i},this)" ondragend="dndEnd()">
-      <span class="drag" title="드래그로 순서 변경">⠿</span>
+  // 정기지출 리스트 (결제일 순 정렬)
+  const order=[...fixed.keys()].sort((a,b)=>((fixed[a].day||99)-(fixed[b].day||99)));
+  $("fxList").innerHTML=order.map(i=>{const f=fixed[i];const isCard=f.method!=="계좌/현금";
+    return `<li class="sched-item">
       <span class="time">${f.day?f.day+"일":"-"}</span>
+      <span class="cat-tag">${esc(f.cat||"기타")}</span>
       <span class="txt">${esc(f.name)}</span>
       <span class="exp-tag ${isCard?"card":""}">${esc(f.method)}</span>
       <span class="exp-amt">${wonKR(f.amt)}</span>
