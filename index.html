@@ -1062,30 +1062,36 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const evalOf=s=>s.stockEval||(lastBal.holdings||[]).filter(h=>h.account===s.account).reduce((t,h)=>t+(h.evalAmt||0),0);
   const evalSum=sums.length?sums.reduce((t,s)=>t+evalOf(s),0)
     :(lastBal.holdings||[]).reduce((s,h)=>s+(h.evalAmt||0),0);
-  const cash=lastBal.cash||0;
+  // 증권사 앱이 표시하는 예수금은 D+2 정산 기준이다. 출금가능액을 쓰면 미정산 매도대금이 빠진다.
+  const cash=lastBal.cashD2||lastBal.cash||0;
   const cfDiv=cfTotals().div; // 배당은 원금이 아니라 수익
-  const invested=buyAmt-sellAmt+cash-cfDiv;
-  // 증권사가 계산한 순자산(nass_amt)이 있으면 그 값을 쓴다. 미수·정산 대기분까지 반영돼 앱 표시값과 맞는다.
-  const asset=lastBal.netAsset||(evalSum+cash);
+  const cfNet=cfTotals().net; // 실제 입금 기록이 있으면 역산보다 정확하다
+  const invested=cfNet>0?cfNet:(buyAmt-sellAmt+cash-cfDiv);
+  const asset=evalSum+cash;
   const pnl=asset-invested;
   const rate=invested>0?(pnl/invested*100):0;
   if(invested>0)saveSnapshot(asset,invested); // 오늘 값은 재구성보다 정확하므로 추이용으로 남긴다
+  // 총손익 = 평가손익 + 실현손익 + 배당. 성격이 달라 뭉치면 판단이 어려우므로 나눠 보인다.
+  const evalPnl=lastBal.evalPnl||(lastBal.holdings||[]).reduce((s,h)=>s+(h.pnl||0),0);
+  const realized=pnl-evalPnl-cfDiv;
+  const col=v=>`<span style="color:${v>=0?"var(--accent2)":"var(--danger)"}">${v>=0?"+":""}${won(v)}</span>`;
   // .exp-box.total .num 이 색을 덮어써서 인라인으로 지정한다
   const c=pnl>=0?"var(--accent2)":"var(--danger)";
   box.innerHTML=`
-    <div class="exp-box"><div class="lbl">투입 원금(추정)</div><div class="num">${won(invested)}</div>
-      <div class="lbl" style="margin:4px 0 0">순투입 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}${cfDiv?" − 배당 "+won(cfDiv):""}</div></div>
+    <div class="exp-box"><div class="lbl">투입 원금${cfNet>0?"":"(추정)"}</div><div class="num">${won(invested)}</div>
+      <div class="lbl" style="margin:4px 0 0">${cfNet>0?"입금 기록 기준":`순투입 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}${cfDiv?" − 배당 "+won(cfDiv):""}`}</div></div>
     <div class="exp-box"><div class="lbl">현재 총자산</div><div class="num">${won(asset)}</div>
-      <div class="lbl" style="margin:4px 0 0">${lastBal.netAsset?"증권사 순자산 기준 · 주식 "+won(evalSum)+" + 현금 "+won(cash):"주식 "+won(evalSum)+" + 현금 "+won(cash)}</div></div>
-    <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div></div>
+      <div class="lbl" style="margin:4px 0 0">주식 ${won(evalSum)} + 예수금 ${won(cash)}</div></div>
+    <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div>
+      <div class="lbl" style="margin:4px 0 0">평가 ${col(evalPnl)} · 실현 ${col(realized)}${cfDiv?" · 배당 "+col(cfDiv):""}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총수익률</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${rate.toFixed(2)}%</div></div>`;
   // 계좌가 통째로 누락되면 원금이 크게 틀어지므로 계좌별 내역을 항상 노출한다
   const tradeAccts=Object.keys(byAcct||{});
   const names=sums.map(s=>s.account).concat(tradeAccts.filter(k=>!sums.some(s=>s.account===k)));
   const lines=names.map(n=>{
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
-    const ev=s?evalOf(s):0, ca=s?(s.cash||0):0;
-    const inv=t.buy-t.sell+ca, ast=(s&&s.netAsset)||(ev+ca), p=ast-inv, rt=inv>0?(p/inv*100):0;
+    const ev=s?evalOf(s):0, ca=s?(s.cashD2||s.cash||0):0;
+    const inv=t.buy-t.sell+ca, ast=ev+ca, p=ast-inv, rt=inv>0?(p/inv*100):0;
     const pc=p>=0?"var(--accent2)":"var(--danger)";
     const warn=!s?' <span style="color:#f5a623">← 잔고 조회 실패</span>':(!t.n?' <span style="color:#f5a623">← 체결내역 0건</span>':"");
     return `<b>${esc(n)}</b> 투입 ${won(inv)} → 자산 ${won(ast)} `
@@ -1102,7 +1108,7 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   };
   const detail=names.map(n=>{
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
-    return proof(n,t.buy,t.sell,s?(s.cash||0):0,s?evalOf(s):0,t.n,s?s.netAsset:0);
+    return proof(n,t.buy,t.sell,s?(s.cashD2||s.cash||0):0,s?evalOf(s):0,t.n,0);
   }).join("<br>");
   // 증권사 앱 표시값과 어느 항목이 맞는지 바로 대조할 수 있게 총자산 후보를 나란히 보인다
   const cand=[
@@ -1122,7 +1128,8 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     +"배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요."
     +(cash?"":' <span style="color:#f5a623">예수금이 0이라 원금이 실제보다 적게 나옵니다.</span>')
     +`<details style="margin-top:6px"><summary style="cursor:pointer">계산 근거 보기</summary>`
-    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,lastBal.netAsset)}`
+    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,0)}`
+    +(cfNet>0?`<br><span style="padding-left:10px">입금 기록 기준 원금 ${won(cfNet)} (역산값 ${won(buyAmt-sellAmt+cash-cfDiv)}과 ${won(Math.abs(cfNet-(buyAmt-sellAmt+cash-cfDiv)))} 차이)</span>`:"")
     +`<br><br><b>총자산 후보값 (증권사 앱 표시값과 대조하세요)</b><br>${cand}${raw2}</div></details>`;
 }
 function renderTrades(list){
@@ -1294,7 +1301,7 @@ async function loadEquity(ev){
     }
     const days=[...new Set(Object.values(px).flatMap(m=>Object.keys(m)))].sort().filter(d=>d>=from);
     if(!days.length){msg.textContent="시세를 못 받아 추이를 만들 수 없어요.";return;}
-    const cash0=lastBal.cash||0;
+    const cash0=lastBal.cashD2||lastBal.cash||0; // 요약과 같은 D+2 예수금 기준
     const buyAll=evs.filter(e=>!e.sell).reduce((s,e)=>s+e.amt,0);
     const sellAll=evs.filter(e=>e.sell).reduce((s,e)=>s+e.amt,0);
     const invested=buyAll-sellAll+cash0-cfTotals().div; // 배당은 원금이 아니므로 제외
