@@ -1094,8 +1094,8 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     const inv=t.buy-t.sell+ca, ast=ev+ca, p=ast-inv, rt=inv>0?(p/inv*100):0;
     const pc=p>=0?"var(--accent2)":"var(--danger)";
     const warn=!s?' <span style="color:#f5a623">← 잔고 조회 실패</span>':(!t.n?' <span style="color:#f5a623">← 체결내역 0건</span>':"");
-    return `<b>${esc(n)}</b> 투입 ${won(inv)} → 자산 ${won(ast)} `
-      +`<b style="color:${pc}">${p>=0?"+":""}${won(p)} (${p>=0?"+":""}${rt.toFixed(2)}%)</b>${warn}`;
+    return `<b>${esc(n)}</b> · 투입 ${won(inv)} → 자산 ${won(ast)} `
+      +`<b style="color:${pc}">(손익 ${p>=0?"+":""}${won(p)} · ${p>=0?"+":""}${rt.toFixed(2)}%)</b>${warn}`;
   }).join("<br>");
   // 누계를 그냥 나열하면 손익과 무관한 숫자로 오해된다. 어떻게 원금이 나왔는지 검산식으로 보인다.
   const proof=(n,buy,sell,ca,ev,cnt,na)=>{
