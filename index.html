@@ -1037,7 +1037,7 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const c=pnl>=0?"var(--accent2)":"var(--danger)";
   box.innerHTML=`
     <div class="exp-box"><div class="lbl">투입 원금(추정)</div><div class="num">${won(invested)}</div>
-      <div class="lbl" style="margin:4px 0 0">순매수 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}</div></div>
+      <div class="lbl" style="margin:4px 0 0">순투입 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}</div></div>
     <div class="exp-box"><div class="lbl">현재 총자산</div><div class="num">${won(asset)}</div>
       <div class="lbl" style="margin:4px 0 0">주식 ${won(evalSum)} + 현금 ${won(cash)}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div></div>
@@ -1048,13 +1048,22 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const lines=names.map(n=>{
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
     const ev=s?evalOf(s):0, ca=s?(s.cash||0):0;
+    const inv=t.buy-t.sell+ca, ast=ev+ca, p=ast-inv, rt=inv>0?(p/inv*100):0;
+    const pc=p>=0?"var(--accent2)":"var(--danger)";
     const warn=!s?' <span style="color:#f5a623">← 잔고 조회 실패</span>':(!t.n?' <span style="color:#f5a623">← 체결내역 0건</span>':"");
-    return `<b>${esc(n)}</b> 매수 ${won(t.buy)} · 매도 ${won(t.sell)} · 현금 ${won(ca)} · 주식 ${won(ev)} (${t.n}건)${warn}`;
+    return `<b>${esc(n)}</b> 투입 ${won(inv)} → 자산 ${won(ast)} `
+      +`<b style="color:${pc}">${p>=0?"+":""}${won(p)} (${p>=0?"+":""}${rt.toFixed(2)}%)</b>${warn}`;
+  }).join("<br>");
+  // 매수·매도 누계는 원금을 역산하는 중간값일 뿐이라 접어둔다. 값이 틀렸을 때 추적용으로만 남긴다.
+  const detail=names.map(n=>{
+    const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
+    return `${esc(n)} — 매수누계 ${won(t.buy)} · 매도누계 ${won(t.sell)} · 현금 ${won(s?(s.cash||0):0)} · 주식 ${won(s?evalOf(s):0)} · ${t.n}건`;
   }).join("<br>");
   note.innerHTML=(lines?lines+"<br>":"")
-    +`<b>합계</b> 매수 ${won(buyAmt)} · 매도 ${won(sellAmt)} · 현금 ${won(cash)} · 주식 ${won(evalSum)}`
-    +(cash?"":' <span style="color:#f5a623">— 예수금이 0이라 원금이 실제보다 적게 나옵니다</span>')
-    +"<br>배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요.";
+    +"배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요."
+    +(cash?"":' <span style="color:#f5a623">예수금이 0이라 원금이 실제보다 적게 나옵니다.</span>')
+    +`<details style="margin-top:6px"><summary style="cursor:pointer">계산 근거 보기</summary>`
+    +`<div style="padding:6px 0 0 8px">${detail}<br>합계 — 매수누계 ${won(buyAmt)} · 매도누계 ${won(sellAmt)} · 현금 ${won(cash)} · 주식 ${won(evalSum)}</div></details>`;
 }
 function renderTrades(list){
   list=list||[];
