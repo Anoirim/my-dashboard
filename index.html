@@ -1377,10 +1377,16 @@ function drawEquity(labels,assets,investLine,fullDates){
         tooltip:{
           backgroundColor:"#1a2130",borderColor:"#2a3346",borderWidth:1,
           titleColor:"#e6ebf5",bodyColor:"#e6ebf5",padding:10,displayColors:true,
+          // 손익은 footer로 빼야 색을 따로 줄 수 있다(body는 데이터셋 색을 따라감)
+          footerColor:ctx=>{
+            const it=(ctx&&ctx.tooltipItems)||[];
+            if(!it.length)return "#e6ebf5";
+            return (assets[it[0].dataIndex]-investLine[it[0].dataIndex])>=0?"#33d69f":"#ff5c72";
+          },
           callbacks:{
             title:it=>(fullDates&&fullDates[it[0].dataIndex])||it[0].label,
             label:c=>" "+c.dataset.label+" "+won(c.parsed.y),
-            afterBody:it=>{
+            footer:it=>{
               const i=it[0].dataIndex, p=assets[i]-investLine[i];
               const r=investLine[i]?(p/investLine[i]*100).toFixed(2):"0.00";
               return "손익 "+(p>=0?"+":"")+won(p)+" ("+(p>=0?"+":"")+r+"%)";
