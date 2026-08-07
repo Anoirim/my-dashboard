@@ -81,6 +81,9 @@
   .exp-label{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:600}
   .exp-divider{height:1px;background:var(--border);margin:18px 0}
   .exp-edit{color:var(--accent)!important;border:none;background:transparent;cursor:pointer;padding:4px 6px;font-size:13px}
+  .drag{cursor:grab;color:var(--muted);user-select:none;font-size:14px;padding-right:2px}
+  .drag:active{cursor:grabbing}
+  .sched-item.drag-over{border-top:2px solid var(--accent)}
   /* 보유 종목 테이블 */
   .htbl{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap;min-width:720px}
   .htbl th,.htbl td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--border)}
@@ -545,6 +548,22 @@ function buildMethodOptions(sel){
   $("fxMethod").innerHTML=opts.map(o=>`<option ${o===sel?"selected":""}>${o}</option>`).join("");
 }
 
+/* --- 드래그 앤 드롭 순서 변경 --- */
+let dndType=null,dndFrom=null;
+function dndStart(type,i){dndType=type;dndFrom=i;}
+function dndOver(e,el){e.preventDefault();if(el)el.classList.add("drag-over");}
+function dndLeave(el){if(el)el.classList.remove("drag-over");}
+function dndEnd(){document.querySelectorAll(".drag-over").forEach(x=>x.classList.remove("drag-over"));dndType=null;dndFrom=null;}
+function dndDrop(type,to,el){
+  if(el)el.classList.remove("drag-over");
+  if(dndType!==type||dndFrom===null||dndFrom===to){dndEnd();return;}
+  const arr=type==="card"?cards:fixed;
+  const [moved]=arr.splice(dndFrom,1);
+  arr.splice(to,0,moved);
+  saveExpData();renderExpAll();
+  dndEnd();
+}
+
 // 직전 달의 정기지출·카드를 현재 달로 이월 (중복 제외)
 function carryFixedFromPrev(){
   const prev=Object.keys(expData).filter(k=>k<curMonth && expData[k].fixed && expData[k].fixed.length).sort().pop();
@@ -569,7 +588,9 @@ function renderExpAll(){
     const on=c.inc!==false;
     const inc=fixed.filter(f=>f.method===c.name).reduce((s,f)=>s+f.amt,0);
     const etc=c.bill-inc;
-    return `<li class="sched-item" style="${on?'':'opacity:.5'}">
+    return `<li class="sched-item" draggable="true" style="${on?'':'opacity:.5'}"
+      ondragstart="dndStart('card',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('card',${i},this)" ondragend="dndEnd()">
+      <span class="drag" title="드래그로 순서 변경">⠿</span>
       <input type="checkbox" ${on?'checked':''} onchange="toggleCard(${i})" title="월 총지출 계산 포함">
       <span class="time">${c.day?c.day+"일":"-"}</span>
       <span class="txt">${esc(c.name)} <span style="color:var(--muted);font-size:12px">· 정기 ${wonKR(inc)} + 기타 ${wonKR(etc)}</span></span>
@@ -579,10 +600,11 @@ function renderExpAll(){
     </li>`;
   }).join("")||'<div class="hint">등록된 카드가 없습니다.</div>';
 
-  // 정기지출 리스트 (결제일 순 정렬, 날짜·결제수단 표시)
-  const order=[...fixed.keys()].sort((a,b)=>((fixed[a].day||99)-(fixed[b].day||99)));
-  $("fxList").innerHTML=order.map(i=>{const f=fixed[i];const isCard=f.method!=="계좌/현금";
-    return `<li class="sched-item">
+  // 정기지출 리스트 (사용자 지정 순서, 드래그로 변경)
+  $("fxList").innerHTML=fixed.map((f,i)=>{const isCard=f.method!=="계좌/현금";
+    return `<li class="sched-item" draggable="true"
+      ondragstart="dndStart('fixed',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('fixed',${i},this)" ondragend="dndEnd()">
+      <span class="drag" title="드래그로 순서 변경">⠿</span>
       <span class="time">${f.day?f.day+"일":"-"}</span>
       <span class="txt">${esc(f.name)}</span>
       <span class="exp-tag ${isCard?"card":""}">${esc(f.method)}</span>
