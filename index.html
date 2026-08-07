@@ -339,6 +339,14 @@ function backupData(){
   a.download="dashboard-backup-"+new Date().toISOString().slice(0,10)+".json";
   a.click();
 }
+// 저장 항목이 늘어날 때마다 복원 누락이 생기지 않도록 재적재를 한 곳에 모은다
+function reloadAll(){
+  expData=JSON.parse(localStorage.getItem("expData")||"{}");
+  scheds=JSON.parse(localStorage.getItem("scheds")||"[]");
+  cashFlows=JSON.parse(localStorage.getItem("cashFlows")||"[]");
+  curMonth=localStorage.getItem("curMonth")||curMonth;
+  renderScheds();renderEye();renderCashFlows();loadMonth(curMonth);
+}
 function restoreData(input){
   const f=input.files[0]; if(!f)return;
   const r=new FileReader();
@@ -346,9 +354,7 @@ function restoreData(input){
     try{
       const data=JSON.parse(r.result);
       Object.keys(data).forEach(k=>localStorage.setItem(k,data[k]));
-      expData=JSON.parse(localStorage.getItem("expData")||"{}");
-      scheds=JSON.parse(localStorage.getItem("scheds")||"[]");
-      renderScheds();renderEye();loadMonth(curMonth);
+      reloadAll();
       alert("복원 완료! 데이터를 되살렸습니다.");
     }catch(e){alert("복원 실패: 올바른 백업 파일인지 확인하세요.");}
   };
@@ -385,9 +391,7 @@ async function loadFromFile(){
   if(!txt.trim())return false;
   const data=JSON.parse(txt);
   Object.keys(data).forEach(k=>localStorage.setItem(k,data[k]));
-  expData=JSON.parse(localStorage.getItem("expData")||"{}");
-  scheds=JSON.parse(localStorage.getItem("scheds")||"[]");
-  renderScheds();renderEye();loadMonth(curMonth);
+  reloadAll();
   return true;
 }
 function setFileState(s){
