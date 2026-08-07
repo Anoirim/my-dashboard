@@ -250,7 +250,8 @@ async function tradesOnce(a, trId, from, to, fk, nk) {
     INQR_STRT_DT: from, INQR_END_DT: to,
     SLL_BUY_DVSN_CD: "00", PDNO: "", CCLD_DVSN: "01",
     INQR_DVSN: "00", INQR_DVSN_1: "", INQR_DVSN_3: "00",
-    ORD_GNO_BRNO: "", ODNO: "", EXCG_ID_DVSN_CD: "KRX",
+    // KRX로 고정하면 넥스트레이드(NXT)·SOR 경유 체결분이 통째로 빠진다. ALL이 전체 거래소.
+    ORD_GNO_BRNO: "", ODNO: "", EXCG_ID_DVSN_CD: "ALL",
     CTX_AREA_FK100: fk, CTX_AREA_NK100: nk,
   }).toString();
   const url = BASE + "/uapi/domestic-stock/v1/trading/inquire-daily-ccld?" + q;
