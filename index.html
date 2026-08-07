@@ -227,6 +227,22 @@
       <div id="holdingsWrap" style="overflow-x:auto"></div>
     </div>
 
+    <!-- 목표 현금 만들기 -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#c77dff"></span>목표 현금 만들기</h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="number" id="coTarget" placeholder="필요 금액(원)" style="width:160px">
+        <select id="coOrder" style="width:150px">
+          <option value="profit">이익 큰 순</option>
+          <option value="loss">손실 큰 순</option>
+          <option value="amount">평가금액 큰 순</option>
+        </select>
+        <button onclick="calcCashOut()">계산</button>
+        <span class="hint" id="coMsg" style="margin:0">보유 종목을 먼저 불러오세요.</span>
+      </div>
+      <div id="coWrap" style="overflow-x:auto"></div>
+    </div>
+
     <!-- 거래내역 (체결 기록) -->
     <div class="card full">
       <h2><span class="dot" style="background:#c77dff"></span>거래내역 (체결 기록)</h2>
@@ -963,6 +979,7 @@ async function loadHoldings(ev){
     const r=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json());
     if(r.error){msg.textContent="오류: "+r.error;return;}
     const hs=r.holdings||[];
+    lastHoldings=hs; // 목표 현금 계산에서 재사용
     if(!hs.length)$("holdingsWrap").innerHTML='<div class="hint">보유 종목이 없거나 계좌가 설정되지 않았어요.</div>';
     else renderHoldings(hs);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
@@ -1006,6 +1023,67 @@ function renderHoldings(hs){
       <td style="color:var(--accent2)">${won(totTarget)}</td>
     </tr></tfoot>
   </table>`;
+}
+
+/* ===== 목표 현금 만들기 ===== */
+let lastHoldings=[];
+// 매도 실수령 = 수량 × 현재가 × (1 − 수수료 − 거래세). ETF는 거래세 면제
+const coNet=(h,fee)=>h.price*(1-fee-(isEtfName(h.name)?0:0.002));
+const coPnl=(h,qty,fee)=>(h.price-h.avg)*qty-h.price*qty*(fee+(isEtfName(h.name)?0:0.002));
+function calcCashOut(){
+  const msg=$("coMsg");
+  if(!lastHoldings.length){msg.textContent="보유 종목을 먼저 불러오세요.";return;}
+  const target=parseFloat($("coTarget").value)||0;
+  if(target<=0){msg.textContent="필요 금액을 입력하세요.";return;}
+  const fee=(parseFloat($("hFee").value)||0)/100, order=$("coOrder").value;
+  const list=[...lastHoldings].sort((a,b)=>{
+    if(order==="amount")return (b.evalAmt||0)-(a.evalAmt||0);
+    const pa=(a.price-a.avg)*a.qty, pb=(b.price-b.avg)*b.qty;
+    return order==="loss"?pa-pb:pb-pa;
+  });
+  // 조합: 정렬 순서대로 부족분만큼씩 채워 나간다
+  let remain=target;
+  const picks=[];
+  list.forEach(h=>{
+    if(remain<=0)return;
+    const net=coNet(h,fee);
+    if(net<=0)return;
+    const qty=Math.min(Math.ceil(remain/net),h.qty);
+    if(!qty)return;
+    picks.push({h,qty,cash:qty*net,pnl:coPnl(h,qty,fee)});
+    remain-=qty*net;
+  });
+  // 단독: 한 종목만으로 목표를 채울 때
+  const solo=list.map(h=>{
+    const net=coNet(h,fee), need=Math.ceil(target/net), qty=Math.min(need,h.qty);
+    return {h,qty,need,short:need>h.qty,cash:qty*net,pnl:coPnl(h,qty,fee)};
+  });
+  renderCashOut(picks,solo,target,remain);
+  msg.textContent="수수료 "+($("hFee").value||0)+"% 기준 · ETF는 거래세 면제";
+}
+function renderCashOut(picks,solo,target,remain){
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR");
+  const sign=v=>`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${won(v)}</span>`;
+  const cash=picks.reduce((s,p)=>s+p.cash,0), pnl=picks.reduce((s,p)=>s+p.pnl,0);
+  const row=p=>`<tr>
+    <td class="l"><span class="acct">${esc(p.h.account)}</span></td>
+    <td class="l">${esc(p.h.name)}</td>
+    <td>${p.qty.toLocaleString()}</td>
+    <td>${won(p.h.price)}</td>
+    <td>${won(p.cash)}</td>
+    <td>${sign(p.pnl)}</td>
+    <td>${(p.h.qty-p.qty).toLocaleString()}</td>
+    ${p.short!=null?`<td class="l">${p.short?'<span style="color:#f5a623">전량 매도해도 '+won(target-p.cash)+' 부족</span>':"가능"}</td>`:""}
+  </tr>`;
+  const head=extra=>`<thead><tr><th class="l">계좌</th><th class="l">종목</th><th>팔 수량</th>
+    <th>현재가</th><th>실수령액</th><th>실현손익</th><th>남는 수량</th>${extra?'<th class="l">비고</th>':""}</tr></thead>`;
+  $("coWrap").innerHTML=`<div class="exp-label">🎯 조합 매도 (${$("coOrder").selectedOptions[0].text})</div>`
+    +`<table class="htbl">${head(0)}<tbody>${picks.map(row).join("")}</tbody>
+      <tfoot><tr><td class="l" colspan="4">합계</td><td>${won(cash)}</td><td>${sign(pnl)}</td><td></td></tr></tfoot></table>`
+    +(remain>0?`<div class="hint" style="color:#f5a623;margin-top:8px">보유 종목을 전부 팔아도 ${won(remain)} 부족합니다.</div>`
+      :`<div class="hint" style="margin-top:8px">목표 ${won(target)} 대비 ${won(cash-target)} 더 들어옵니다(수량은 주 단위라 올림).</div>`)
+    +`<div class="exp-divider"></div><div class="exp-label">📌 한 종목만으로 만들 때</div>`
+    +`<table class="htbl">${head(1)}<tbody>${solo.map(row).join("")}</tbody></table>`;
 }
 
 /* ===== 거래내역 (체결 기록) ===== */
