@@ -32,36 +32,38 @@ async function kvSet(key, val, exSec) {
   } catch (e) {}
 }
 
-async function getToken() {
-  // 1) 같은 인스턴스 메모리 캐시
-  if (tokenCache.token && Date.now() < tokenCache.exp) return tokenCache.token;
-  // 2) KV 저장소 (인스턴스 간 공유 → 하루 1회만 발급)
-  const saved = await kvGet("kis_token");
-  if (saved) { tokenCache = { token: saved, exp: Date.now() + 60 * 60 * 1000 }; return saved; }
-  // 3) 신규 발급
+// 앱키별 토큰 캐시 (계좌마다 키가 다르므로 키별로 관리)
+const tokenCaches = {};
+async function getTokenFor(appkey, appsecret) {
+  if (!appkey || !appsecret) throw new Error("APPKEY/APPSECRET 누락");
+  const c = tokenCaches[appkey];
+  if (c && Date.now() < c.exp) return c.token;
+  const kvKey = "kis_token_" + appkey.slice(0, 16);
+  const saved = await kvGet(kvKey);
+  if (saved) { tokenCaches[appkey] = { token: saved, exp: Date.now() + 60 * 60 * 1000 }; return saved; }
   const r = await fetch(BASE + "/oauth2/tokenP", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      grant_type: "client_credentials",
-      appkey: process.env.KIS_APPKEY,
-      appsecret: process.env.KIS_APPSECRET,
-    }),
+    body: JSON.stringify({ grant_type: "client_credentials", appkey, appsecret }),
   });
   const j = await r.json();
   if (!j.access_token) throw new Error(j.error_description || j.msg1 || "토큰 발급 실패");
   const lifeSec = j.expires_in ? j.expires_in : 23 * 3600;
-  tokenCache = { token: j.access_token, exp: Date.now() + (lifeSec - 60) * 1000 };
-  await kvSet("kis_token", j.access_token, lifeSec - 300); // KV엔 만료 5분 전까지 보관
-  return tokenCache.token;
+  tokenCaches[appkey] = { token: j.access_token, exp: Date.now() + (lifeSec - 60) * 1000 };
+  await kvSet(kvKey, j.access_token, lifeSec - 300);
+  return j.access_token;
+}
+// 시세용(계좌 무관): 기본 키 사용
+async function getToken() {
+  return getTokenFor(process.env.KIS_APPKEY, process.env.KIS_APPSECRET);
 }
 
-function headers(token, tr_id) {
+function headers(token, tr_id, key, secret) {
   return {
     "content-type": "application/json",
     authorization: "Bearer " + token,
-    appkey: process.env.KIS_APPKEY,
-    appsecret: process.env.KIS_APPSECRET,
+    appkey: key || process.env.KIS_APPKEY,
+    appsecret: secret || process.env.KIS_APPSECRET,
     tr_id,
     custtype: "P",
   };
@@ -153,34 +155,40 @@ async function getFull(symbol) {
   return { ...p, name, candles, isEtf: false, roe, debtRatio };
 }
 
-// --- 잔고조회 (두 계좌 통합) ---
-// 환경변수 KIS_ACCTS 예: "일반=1234567801,ISA=8765432101" (이름=계좌번호, 번호는 10자리)
-function parseAccts() {
-  return (process.env.KIS_ACCTS || "")
-    .split(",").map((s) => s.trim()).filter(Boolean)
-    .map((s) => {
-      const [label, no] = s.includes("=") ? [s.split("=")[0], s.split("=")[1]] : ["계좌", s];
-      const digits = (no || "").replace(/[^0-9]/g, "");
-      return { label: label.trim(), cano: digits.slice(0, 8), prdt: digits.slice(8, 10) };
-    })
-    .filter((a) => a.cano.length === 8 && a.prdt.length === 2);
+// --- 잔고조회 (계좌별 각자의 API 키 사용) ---
+// 환경변수 (계좌마다):
+//   KIS_ACCT1_NAME, KIS_ACCT1_NO, KIS_ACCT1_APPKEY, KIS_ACCT1_APPSECRET
+//   KIS_ACCT2_NAME, KIS_ACCT2_NO, KIS_ACCT2_APPKEY, KIS_ACCT2_APPSECRET  (최대 4개)
+function acctConfigs() {
+  const list = [];
+  for (let i = 1; i <= 4; i++) {
+    const no = process.env["KIS_ACCT" + i + "_NO"];
+    if (!no) continue;
+    list.push({
+      label: process.env["KIS_ACCT" + i + "_NAME"] || ("계좌" + i),
+      no: no.replace(/[^0-9]/g, ""),
+      key: process.env["KIS_ACCT" + i + "_APPKEY"] || process.env.KIS_APPKEY,
+      secret: process.env["KIS_ACCT" + i + "_APPSECRET"] || process.env.KIS_APPSECRET,
+    });
+  }
+  return list.filter((a) => a.no.length >= 10);
 }
 async function getBalance() {
-  const accts = parseAccts();
-  if (!accts.length) return { error: "계좌가 설정되지 않았습니다 (환경변수 KIS_ACCTS)" };
-  const token = await getToken();
+  const accts = acctConfigs();
+  if (!accts.length) return { error: "계좌가 설정되지 않았습니다 (KIS_ACCT1_NO 등)" };
   const trId = IS_MOCK ? "VTTC8434R" : "TTTC8434R";
   const holdings = [];
   const errors = [];
   for (const a of accts) {
     try {
+      const token = await getTokenFor(a.key, a.secret); // 계좌별 키로 토큰
       const q = new URLSearchParams({
-        CANO: a.cano, ACNT_PRDT_CD: a.prdt, AFHR_FLPR_YN: "N", OFL_YN: "",
+        CANO: a.no.slice(0, 8), ACNT_PRDT_CD: a.no.slice(8, 10), AFHR_FLPR_YN: "N", OFL_YN: "",
         INQR_DVSN: "02", UNPR_DVSN: "01", FUND_STTL_ICLD_YN: "N",
         FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00", CTX_AREA_FK100: "", CTX_AREA_NK100: "",
       }).toString();
       const url = BASE + "/uapi/domestic-stock/v1/trading/inquire-balance?" + q;
-      const j = await (await fetch(url, { headers: headers(token, trId) })).json();
+      const j = await (await fetch(url, { headers: headers(token, trId, a.key, a.secret) })).json();
       if (j.rt_cd !== "0") { errors.push(a.label + ": " + (j.msg1 || "조회 실패")); continue; }
       (j.output1 || []).forEach((o) => {
         const qty = num(o.hldg_qty);

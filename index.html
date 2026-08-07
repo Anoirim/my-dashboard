@@ -881,7 +881,7 @@ async function loadHoldings(){
     if(!hs.length)$("holdingsWrap").innerHTML='<div class="hint">보유 종목이 없거나 계좌가 설정되지 않았어요.</div>';
     else renderHoldings(hs);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
-  }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCTS)와 배포를 확인하세요.";}
+  }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCT1_NO 등)와 배포를 확인하세요.";}
 }
 function renderHoldings(hs){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
