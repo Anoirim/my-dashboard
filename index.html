@@ -1206,6 +1206,7 @@ async function loadEquity(ev){
       while(ei<evs.length&&evs[ei].date<=d){
         const e=evs[ei];
         hold[e.code]=(hold[e.code]||0)+(e.sell?-e.qty:e.qty);
+        if(e.qty)lastPx[e.code]=e.amt/e.qty; // 일봉이 비는 종목은 체결 단가로 평가한다
         e.sell?restSell-=e.amt:restBuy-=e.amt;
         ei++;
       }
@@ -1223,8 +1224,15 @@ async function loadEquity(ev){
     days.forEach((d,i)=>{const k=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);if(snap[k])assets[i]=snap[k].asset;});
     drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,invested);
     const cur=assets[assets.length-1],p=cur-invested;
+    // 시작일 자산은 원금과 거의 같아야 정상. 벌어지면 시세 공백을 의심해야 하므로 알린다.
+    const noPx=codes.filter(c=>!px[c]||!Object.keys(px[c]).length);
+    const nameOf=c=>{const h=(lastBal.holdings||[]).find(x=>x.code===c);return h?h.name+"("+c+")":c;};
+    const gap=assets[0]-invested;
     $("eqNote").innerHTML=`원금 ${wonKR(invested)} · 현재 ${wonKR(cur)} · `
       +`<b style="color:${p>=0?"var(--accent2)":"var(--danger)"}">${p>=0?"+":""}${wonKR(p)} (${(invested?p/invested*100:0).toFixed(2)}%)</b>`
+      +(Math.abs(gap)>invested*0.02
+        ? `<br><span style="color:#f5a623">시작일 자산이 원금과 ${wonKR(Math.abs(gap))} 차이 납니다 — 아래 시세 누락 종목을 확인하세요.</span>`:"")
+      +(noPx.length?`<br><span style="color:#f5a623">시세를 못 받은 종목: ${noPx.map(c=>esc(nameOf(c))).join(", ")} (체결 단가로 대체 평가)</span>`:"")
       +`<br>입출금이 없다고 보고 원금을 일정하게 그렸어요. 배당·추가입금이 있으면 실제와 달라집니다.`;
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`;
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
