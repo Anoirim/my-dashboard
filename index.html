@@ -217,7 +217,7 @@
       <div class="row" style="margin-bottom:12px;align-items:center">
         <input type="number" id="hFee" value="0.015" step="0.001" style="width:150px" placeholder="수수료 편도(%)">
         <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)">
-        <button onclick="loadHoldings()">불러오기</button>
+        <button onclick="loadHoldings(event)">불러오기</button>
         <span class="hint" id="hMsg" style="margin:0"></span>
       </div>
       <div id="holdingsWrap" style="overflow-x:auto"></div>
@@ -872,7 +872,11 @@ function drawSimple(sym,q){
 /* ===== 내 보유 종목 (두 계좌 통합) ===== */
 const ETF_KW=["KODEX","TIGER","RISE","ACE","SOL","PLUS","KBSTAR","ARIRANG","HANARO","KOSEF","TIMEFOLIO","ETF","ETN"];
 function isEtfName(n){return n&&ETF_KW.some(k=>n.toUpperCase().includes(k));}
-async function loadHoldings(){
+let holdingsBusy=false;
+async function loadHoldings(ev){
+  if(holdingsBusy)return;
+  holdingsBusy=true;
+  const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
   const msg=$("hMsg");msg.textContent="불러오는 중...";
   try{
     const r=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json());
@@ -882,15 +886,16 @@ async function loadHoldings(){
     else renderHoldings(hs);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCT1_NO 등)와 배포를 확인하세요.";}
+  finally{holdingsBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
 function renderHoldings(hs){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const fee=(parseFloat($("hFee").value)||0)/100, tgt=(parseFloat($("hTarget").value)||0)/100;
-  let totCost=0,totEval=0,totPnl=0;
+  let totCost=0,totEval=0,totPnl=0,totTarget=0;
   const body=hs.map(h=>{
     const etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
     const bep=h.avg*(1+fee)/denom, target=h.avg*(1+fee)*(1+tgt)/denom;
-    const cost=h.avg*h.qty; totCost+=cost; totEval+=(h.evalAmt||h.price*h.qty); totPnl+=(h.pnl||0);
+    const cost=h.avg*h.qty; totCost+=cost; totEval+=(h.evalAmt||h.price*h.qty); totPnl+=(h.pnl||0); totTarget+=target*h.qty;
     const up=(h.pnl||0)>=0;
     return `<tr>
       <td class="l"><span class="acct">${h.account}</span></td>
@@ -912,10 +917,12 @@ function renderHoldings(hs){
     </tr></thead>
     <tbody>${body}</tbody>
     <tfoot><tr>
-      <td class="l" colspan="5">합계</td>
+      <td class="l" colspan="4">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)} · 수익률 ${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span></td>
+      <td></td>
       <td>${won(totEval)}</td>
       <td class="${tup?"up":"down"}">${tup?"+":""}${won(totPnl)}</td>
-      <td class="l" colspan="2" style="color:var(--muted);font-weight:600">매입 ${won(totCost)} · 수익률 ${(totCost?totPnl/totCost*100:0).toFixed(2)}%</td>
+      <td></td>
+      <td style="color:var(--accent2)">${won(totTarget)}</td>
     </tr></tfoot>
   </table>`;
 }

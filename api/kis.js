@@ -173,22 +173,31 @@ function acctConfigs() {
   }
   return list.filter((a) => a.no.length >= 10);
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function balanceOnce(a, trId) {
+  const token = await getTokenFor(a.key, a.secret); // 계좌별 키로 토큰
+  const q = new URLSearchParams({
+    CANO: a.no.slice(0, 8), ACNT_PRDT_CD: a.no.slice(8, 10), AFHR_FLPR_YN: "N", OFL_YN: "",
+    INQR_DVSN: "02", UNPR_DVSN: "01", FUND_STTL_ICLD_YN: "N",
+    FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00", CTX_AREA_FK100: "", CTX_AREA_NK100: "",
+  }).toString();
+  const url = BASE + "/uapi/domestic-stock/v1/trading/inquire-balance?" + q;
+  return (await fetch(url, { headers: headers(token, trId, a.key, a.secret) })).json();
+}
 async function getBalance() {
   const accts = acctConfigs();
   if (!accts.length) return { error: "계좌가 설정되지 않았습니다 (KIS_ACCT1_NO 등)" };
   const trId = IS_MOCK ? "VTTC8434R" : "TTTC8434R";
   const holdings = [];
   const errors = [];
-  for (const a of accts) {
+  const isRate = (m) => /초당|거래건수|EGW00201|초과/.test(m || "");
+  for (let i = 0; i < accts.length; i++) {
+    const a = accts[i];
+    if (i > 0) await sleep(600); // 계좌 간 간격(초당 제한 회피)
     try {
-      const token = await getTokenFor(a.key, a.secret); // 계좌별 키로 토큰
-      const q = new URLSearchParams({
-        CANO: a.no.slice(0, 8), ACNT_PRDT_CD: a.no.slice(8, 10), AFHR_FLPR_YN: "N", OFL_YN: "",
-        INQR_DVSN: "02", UNPR_DVSN: "01", FUND_STTL_ICLD_YN: "N",
-        FNCG_AMT_AUTO_RDPT_YN: "N", PRCS_DVSN: "00", CTX_AREA_FK100: "", CTX_AREA_NK100: "",
-      }).toString();
-      const url = BASE + "/uapi/domestic-stock/v1/trading/inquire-balance?" + q;
-      const j = await (await fetch(url, { headers: headers(token, trId, a.key, a.secret) })).json();
+      let j = await balanceOnce(a, trId);
+      // 초당 제한이면 잠시 후 1회 재시도
+      if (j.rt_cd !== "0" && isRate(j.msg1)) { await sleep(1000); j = await balanceOnce(a, trId); }
       if (j.rt_cd !== "0") { errors.push(a.label + ": " + (j.msg1 || "조회 실패")); continue; }
       (j.output1 || []).forEach((o) => {
         const qty = num(o.hldg_qty);
