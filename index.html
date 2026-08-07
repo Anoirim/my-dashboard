@@ -979,7 +979,8 @@ async function loadHoldings(ev){
     const r=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json());
     if(r.error){msg.textContent="오류: "+r.error;return;}
     const hs=r.holdings||[];
-    lastHoldings=hs; // 목표 현금 계산에서 재사용
+    // 보유종목 조회와 잔고 조회가 같은 응답이라, 예수금까지 여기서 확보해 둔다
+    lastHoldings=hs; lastBal=r;
     if(!hs.length)$("holdingsWrap").innerHTML='<div class="hint">보유 종목이 없거나 계좌가 설정되지 않았어요.</div>';
     else renderHoldings(hs);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
