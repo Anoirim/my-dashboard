@@ -1054,16 +1054,24 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     return `<b>${esc(n)}</b> 투입 ${won(inv)} → 자산 ${won(ast)} `
       +`<b style="color:${pc}">${p>=0?"+":""}${won(p)} (${p>=0?"+":""}${rt.toFixed(2)}%)</b>${warn}`;
   }).join("<br>");
-  // 매수·매도 누계는 원금을 역산하는 중간값일 뿐이라 접어둔다. 값이 틀렸을 때 추적용으로만 남긴다.
+  // 누계를 그냥 나열하면 손익과 무관한 숫자로 오해된다. 어떻게 원금이 나왔는지 검산식으로 보인다.
+  const proof=(n,buy,sell,ca,ev,cnt)=>{
+    const net=buy-sell;
+    return `<b>${esc(n)}</b>${cnt!=null?` <span style="color:var(--muted)">체결 ${cnt}건</span>`:""}`
+      +`<br><span style="padding-left:10px">순투입 ${won(net)} = 매수 ${won(buy)} − 매도 ${won(sell)}</span>`
+      +`<br><span style="padding-left:10px">투입원금 ${won(net+ca)} = 순투입 + 현금 ${won(ca)}</span>`
+      +`<br><span style="padding-left:10px">총자산 ${won(ev+ca)} = 주식 ${won(ev)} + 현금 ${won(ca)}</span>`
+      +`<br><span style="padding-left:10px">손익 ${won(ev-net)} = 총자산 − 투입원금 (현금은 상쇄)</span>`;
+  };
   const detail=names.map(n=>{
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
-    return `${esc(n)} — 매수누계 ${won(t.buy)} · 매도누계 ${won(t.sell)} · 현금 ${won(s?(s.cash||0):0)} · 주식 ${won(s?evalOf(s):0)} · ${t.n}건`;
+    return proof(n,t.buy,t.sell,s?(s.cash||0):0,s?evalOf(s):0,t.n);
   }).join("<br>");
   note.innerHTML=(lines?lines+"<br>":"")
     +"배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요."
     +(cash?"":' <span style="color:#f5a623">예수금이 0이라 원금이 실제보다 적게 나옵니다.</span>')
     +`<details style="margin-top:6px"><summary style="cursor:pointer">계산 근거 보기</summary>`
-    +`<div style="padding:6px 0 0 8px">${detail}<br>합계 — 매수누계 ${won(buyAmt)} · 매도누계 ${won(sellAmt)} · 현금 ${won(cash)} · 주식 ${won(evalSum)}</div></details>`;
+    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null)}</div></details>`;
 }
 function renderTrades(list){
   list=list||[];
