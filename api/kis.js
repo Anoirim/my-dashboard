@@ -240,6 +240,8 @@ async function getBalance() {
   return {
     holdings, summary, raw2,
     cash: sum("cash"), netAsset: sum("netAsset"), stockEval: sum("stockEval"),
+    cashD2: sum("cashD2"), totalEval: sum("totalEval"),
+    purchase: sum("purchase"), evalPnl: sum("evalPnl"),
     errors: errors.length ? errors : null,
   };
 }

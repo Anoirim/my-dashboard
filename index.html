@@ -1104,13 +1104,26 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
     return proof(n,t.buy,t.sell,s?(s.cash||0):0,s?evalOf(s):0,t.n,s?s.netAsset:0);
   }).join("<br>");
+  // 증권사 앱 표시값과 어느 항목이 맞는지 바로 대조할 수 있게 총자산 후보를 나란히 보인다
+  const cand=[
+    ["순자산 nass_amt (현재 사용중)",lastBal.netAsset],
+    ["총평가 tot_evlu_amt",lastBal.totalEval],
+    ["주식평가 + 예수금",evalSum+cash],
+    ["주식평가 + D+2예수금",evalSum+(lastBal.cashD2||0)],
+    ["예수금 dnca_tot_amt",cash],
+    ["D+2예수금 prvs_rcdl_excc_amt",lastBal.cashD2],
+    ["주식평가 scts_evlu_amt",lastBal.stockEval],
+    ["매입금액 pchs_amt_smtl_amt",lastBal.purchase],
+    ["평가손익 evlu_pfls_smtl_amt",lastBal.evalPnl],
+  ].map(x=>`<span style="padding-left:10px">${x[0]}: <b>${won(x[1]||0)}</b></span>`).join("<br>");
   // 잔고 원본 필드를 보여줘야 예수금·순자산 항목 차이를 그 자리에서 확인할 수 있다
   const raw2=lastBal.raw2?`<br><br><b>잔고 응답 원본(첫 계좌)</b><pre style="white-space:pre-wrap;font-size:11px;margin:4px 0 0">${esc(JSON.stringify(lastBal.raw2,null,1))}</pre>`:"";
   note.innerHTML=(lines?lines+"<br>":"")
     +"배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요."
     +(cash?"":' <span style="color:#f5a623">예수금이 0이라 원금이 실제보다 적게 나옵니다.</span>')
     +`<details style="margin-top:6px"><summary style="cursor:pointer">계산 근거 보기</summary>`
-    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,lastBal.netAsset)}${raw2}</div></details>`;
+    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,lastBal.netAsset)}`
+    +`<br><br><b>총자산 후보값 (증권사 앱 표시값과 대조하세요)</b><br>${cand}${raw2}</div></details>`;
 }
 function renderTrades(list){
   list=list||[];
