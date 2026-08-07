@@ -1344,7 +1344,20 @@ async function loadEquity(ev){
     const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
     // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
     const noPx=codes.filter(c=>!px[c]||!Object.keys(px[c]).length);
-    const nameOf=c=>{const h=(lastBal.holdings||[]).find(x=>x.code===c);return h?h.name+"("+c+")":c;};
+    // 보유종목에 없으면 체결내역에서 이름을 찾는다. 코드만 보이면 정체를 알 수 없다.
+    const nameOf=c=>{
+      const h=(lastBal.holdings||[]).find(x=>x.code===c);
+      if(h)return h.name+" ("+c+")";
+      const t=lastTrades.find(o=>String(pickTr(o,TR_F.code)||"")===c);
+      const nm=t?pickTr(t,TR_F.name):null;
+      return nm?nm+" ("+c+")":c;
+    };
+    // 계산에 얼마나 영향을 주는지 알아야 무시할지 판단할 수 있다
+    const amtOf=c=>{
+      let b=0,s=0;
+      evs.forEach(e=>{if(e.code===c)e.sell?s+=e.amt:b+=e.amt;});
+      return " 매수 "+wonKR(b)+(s?" · 매도 "+wonKR(s):"");
+    };
     const gap=assets[0]-investLine[0];
     const mismatch=cashFlows.length?base-invested:0; // 기록 순입금과 역산 원금의 차이
     $("eqNote").innerHTML=`원금 ${wonKR(base)} · 현재 ${wonKR(cur)} · `
@@ -1353,7 +1366,8 @@ async function loadEquity(ev){
         ? `<br><span style="color:#f5a623">시작일 자산이 그때 원금과 ${wonKR(Math.abs(gap))} 차이 납니다 — 시세 누락이나 입출금 기록 누락을 확인하세요.</span>`:"")
       +(Math.abs(mismatch)>Math.max(invested,1)*0.02
         ? `<br><span style="color:#f5a623">입력한 순입금이 계좌에서 역산한 원금과 ${wonKR(Math.abs(mismatch))} 차이 납니다 — 빠뜨린 입출금이 있는지 보세요.</span>`:"")
-      +(noPx.length?`<br><span style="color:#f5a623">시세를 못 받은 종목: ${noPx.map(c=>esc(nameOf(c))).join(", ")} (체결 단가로 대체 평가)</span>`:"")
+      +(noPx.length?`<br><span style="color:#f5a623">시세를 못 받은 종목 (체결 단가로 대체 평가)<br>`
+        +noPx.map(c=>`<span style="padding-left:14px">${esc(nameOf(c))} —${esc(amtOf(c))}</span>`).join("<br>")+`</span>`:"")
       +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`;
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
