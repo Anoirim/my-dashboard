@@ -1195,6 +1195,13 @@ function addCashFlow(){
   saveCashFlows();renderCashFlows();
 }
 function delCashFlow(i){cashFlows.splice(i,1);saveCashFlows();renderCashFlows();}
+// 월 지출 카드와 같은 방식: 입력창으로 되돌린 뒤 목록에서 빼고, 다시 추가하면 반영된다
+function editCashFlow(i){
+  const f=cashFlows[i];
+  $("cfDate").value=f.date;$("cfType").value=f.type;
+  $("cfAmt").value=f.amt;$("cfMemo").value=f.memo||"";
+  cashFlows.splice(i,1);saveCashFlows();renderCashFlows();
+}
 function renderCashFlows(){
   cashFlows.sort((a,b)=>a.date.localeCompare(b.date));
   $("cfList").innerHTML=cashFlows.map((f,i)=>`
@@ -1203,6 +1210,7 @@ function renderCashFlows(){
       <span class="cat-tag">${CF_LABEL[f.type]||"기타"}</span>
       <span class="txt">${esc(f.memo||"")}</span>
       <span class="exp-amt" style="color:${f.type==="out"?"var(--danger)":"var(--accent2)"}">${f.type==="out"?"-":"+"}${wonKR(f.amt)}</span>
+      <button class="exp-edit" onclick="editCashFlow(${i})">수정</button>
       <button class="del" onclick="delCashFlow(${i})">✕</button>
     </li>`).join("")||'<div class="hint">기록이 없습니다. 입금·출금·배당을 넣으면 원금과 손익이 정확해져요.</div>';
   const t=cfTotals();
