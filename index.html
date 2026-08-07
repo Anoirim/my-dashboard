@@ -1339,7 +1339,8 @@ async function loadEquity(ev){
     if(assets.length)assets[assets.length-1]=nowEval+cash0;
     // 입출금 기록이 있으면 원금선을 날짜별 계단으로, 없으면 기존처럼 일정하게 그린다
     const investLine=days.map(d=>investedAt(d,invested));
-    drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine);
+    drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine,
+      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)));
     const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
     // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
     const noPx=codes.filter(c=>!px[c]||!Object.keys(px[c]).length);
@@ -1358,17 +1359,36 @@ async function loadEquity(ev){
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
   finally{if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
-function drawEquity(labels,assets,investLine){
+function drawEquity(labels,assets,investLine,fullDates){
   const ctx=$("eqChart").getContext("2d");
   if(eqChart)eqChart.destroy();
   const up=assets[assets.length-1]>=investLine[investLine.length-1];
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR")+"원";
   eqChart=new Chart(ctx,{type:"line",
     data:{labels,datasets:[
-      {label:"총자산",data:assets,borderColor:up?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,tension:.15},
-      {label:"투입 원금",data:investLine,borderColor:"#8b97ad",borderDash:[6,4],borderWidth:1.5,pointRadius:0,stepped:true}
+      {label:"총자산",data:assets,borderColor:up?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,pointHoverRadius:5,tension:.15},
+      {label:"투입 원금",data:investLine,borderColor:"#8b97ad",borderDash:[6,4],borderWidth:1.5,pointRadius:0,pointHoverRadius:5,stepped:true}
     ]},
-    options:{plugins:{legend:{labels:{color:"#8b97ad"}}},
-      scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
+    options:{
+      // 세로 어디에 있든 그 날짜의 두 값을 함께 보여준다
+      interaction:{mode:"index",intersect:false},
+      plugins:{
+        legend:{labels:{color:"#8b97ad"}},
+        tooltip:{
+          backgroundColor:"#1a2130",borderColor:"#2a3346",borderWidth:1,
+          titleColor:"#e6ebf5",bodyColor:"#e6ebf5",padding:10,displayColors:true,
+          callbacks:{
+            title:it=>(fullDates&&fullDates[it[0].dataIndex])||it[0].label,
+            label:c=>" "+c.dataset.label+" "+won(c.parsed.y),
+            afterBody:it=>{
+              const i=it[0].dataIndex, p=assets[i]-investLine[i];
+              const r=investLine[i]?(p/investLine[i]*100).toFixed(2):"0.00";
+              return "손익 "+(p>=0?"+":"")+won(p)+" ("+(p>=0?"+":"")+r+"%)";
+            }
+          }
+        }
+      },
+      scales:{y:{ticks:{color:"#8b97ad",callback:v=>Math.round(v/10000).toLocaleString("ko-KR")+"만"},grid:{color:"#2a3346"}},
         x:{ticks:{color:"#8b97ad",maxTicksLimit:10},grid:{display:false}}}}
   });
 }
