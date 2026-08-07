@@ -1036,13 +1036,21 @@ function calcCashOut(){
   const target=parseFloat($("coTarget").value)||0;
   if(target<=0){msg.textContent="필요 금액을 입력하세요.";return;}
   const fee=(parseFloat($("hFee").value)||0)/100, order=$("coOrder").value;
+  // 이미 가진 현금부터 쓴다. 인출 목적이므로 지금 뺄 수 있는 출금가능액 기준.
+  const cashNow=(lastBal&&lastBal.cash)||0;
+  const cashD2=(lastBal&&lastBal.cashD2)||0;
+  const needCash=Math.max(0,target-cashNow);
+  if(!needCash){
+    $("coWrap").innerHTML=`<div class="hint">보유 현금 ${wonKR(cashNow)}만으로 목표 ${wonKR(target)}를 채울 수 있어요. 팔 필요가 없습니다.</div>`;
+    msg.textContent="";return;
+  }
   const list=[...lastHoldings].sort((a,b)=>{
     if(order==="amount")return (b.evalAmt||0)-(a.evalAmt||0);
     const pa=(a.price-a.avg)*a.qty, pb=(b.price-b.avg)*b.qty;
     return order==="loss"?pa-pb:pb-pa;
   });
   // 조합: 정렬 순서대로 부족분만큼씩 채워 나간다
-  let remain=target;
+  let remain=needCash;
   const picks=[];
   list.forEach(h=>{
     if(remain<=0)return;
@@ -1055,13 +1063,14 @@ function calcCashOut(){
   });
   // 단독: 한 종목만으로 목표를 채울 때
   const solo=list.map(h=>{
-    const net=coNet(h,fee), need=Math.ceil(target/net), qty=Math.min(need,h.qty);
+    const net=coNet(h,fee), need=Math.ceil(needCash/net), qty=Math.min(need,h.qty);
     return {h,qty,need,short:need>h.qty,cash:qty*net,pnl:coPnl(h,qty,fee)};
   });
-  renderCashOut(picks,solo,target,remain);
+  renderCashOut(picks,solo,{target,needCash,cashNow,cashD2,remain});
   msg.textContent="수수료 "+($("hFee").value||0)+"% 기준 · ETF는 거래세 면제";
 }
-function renderCashOut(picks,solo,target,remain){
+function renderCashOut(picks,solo,ctx){
+  const {target,needCash,cashNow,cashD2,remain}=ctx;
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const sign=v=>`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${won(v)}</span>`;
   const cash=picks.reduce((s,p)=>s+p.cash,0), pnl=picks.reduce((s,p)=>s+p.pnl,0);
@@ -1073,15 +1082,18 @@ function renderCashOut(picks,solo,target,remain){
     <td>${won(p.cash)}</td>
     <td>${sign(p.pnl)}</td>
     <td>${(p.h.qty-p.qty).toLocaleString()}</td>
-    ${p.short!=null?`<td class="l">${p.short?'<span style="color:#f5a623">전량 매도해도 '+won(target-p.cash)+' 부족</span>':"가능"}</td>`:""}
+    ${p.short!=null?`<td class="l">${p.short?'<span style="color:#f5a623">전량 매도해도 '+won(needCash-p.cash)+' 부족</span>':"가능"}</td>`:""}
   </tr>`;
   const head=extra=>`<thead><tr><th class="l">계좌</th><th class="l">종목</th><th>팔 수량</th>
     <th>현재가</th><th>실수령액</th><th>실현손익</th><th>남는 수량</th>${extra?'<th class="l">비고</th>':""}</tr></thead>`;
-  $("coWrap").innerHTML=`<div class="exp-label">🎯 조합 매도 (${$("coOrder").selectedOptions[0].text})</div>`
+  const d2extra=Math.max(0,cashD2-cashNow); // 이틀 뒤면 더 쓸 수 있는 현금
+  $("coWrap").innerHTML=`<div class="hint" style="margin-bottom:8px">목표 ${won(target)} · 보유 현금 ${won(cashNow)} 사용 → <b>매도로 만들 금액 ${won(needCash)}</b>`
+    +(d2extra?` <span style="color:#f5a623">(D+2까지 기다리면 현금 ${won(cashD2)}까지 쓸 수 있어 ${won(d2extra)} 덜 팔아도 됩니다)</span>`:"")+`</div>`
+    +`<div class="exp-label">🎯 조합 매도 (${$("coOrder").selectedOptions[0].text})</div>`
     +`<table class="htbl">${head(0)}<tbody>${picks.map(row).join("")}</tbody>
       <tfoot><tr><td class="l" colspan="4">합계</td><td>${won(cash)}</td><td>${sign(pnl)}</td><td></td></tr></tfoot></table>`
     +(remain>0?`<div class="hint" style="color:#f5a623;margin-top:8px">보유 종목을 전부 팔아도 ${won(remain)} 부족합니다.</div>`
-      :`<div class="hint" style="margin-top:8px">목표 ${won(target)} 대비 ${won(cash-target)} 더 들어옵니다(수량은 주 단위라 올림).</div>`)
+      :`<div class="hint" style="margin-top:8px">매도 ${won(cash)} + 보유 현금 ${won(cashNow)} = ${won(cash+cashNow)} (목표 대비 ${won(cash+cashNow-target)} 여유, 수량은 주 단위라 올림)</div>`)
     +`<div class="exp-divider"></div><div class="exp-label">📌 한 종목만으로 만들 때</div>`
     +`<table class="htbl">${head(1)}<tbody>${solo.map(row).join("")}</tbody></table>`;
 }
@@ -1147,7 +1159,9 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const invested=cfNet>0?cfNet:(buyAmt-sellAmt+cash-cfDiv);
   const asset=evalSum+cash;
   const pnl=asset-invested;
-  const rate=invested>0?(pnl/invested*100):0;
+  // 수익률 분모는 누적 입금액. 출금해도 분모가 줄지 않아 성과가 왜곡되지 않는다.
+  const rateBase=cfTotals().inn||invested;
+  const rate=rateBase>0?(pnl/rateBase*100):0;
   if(invested>0)saveSnapshot(asset,invested); // 오늘 값은 재구성보다 정확하므로 추이용으로 남긴다
   // 총손익 = 평가손익 + 실현손익 + 배당. 성격이 달라 뭉치면 판단이 어려우므로 나눠 보인다.
   const evalPnl=lastBal.evalPnl||(lastBal.holdings||[]).reduce((s,h)=>s+(h.pnl||0),0);
@@ -1162,7 +1176,8 @@ function renderPnl(buyAmt,sellAmt,byAcct){
       <div class="lbl" style="margin:4px 0 0">주식 ${won(evalSum)} + 예수금 ${won(cash)}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div>
       <div class="lbl" style="margin:4px 0 0">평가 ${col(evalPnl)} · 실현 ${col(realized)}${cfDiv?" · 배당 "+col(cfDiv):""}</div></div>
-    <div class="exp-box total" style="border-color:${c}"><div class="lbl">총수익률</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${rate.toFixed(2)}%</div></div>`;
+    <div class="exp-box total" style="border-color:${c}"><div class="lbl">총수익률</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${rate.toFixed(2)}%</div>
+      ${cfTotals().out?`<div class="lbl" style="margin:4px 0 0">누적 입금 ${won(rateBase)} 대비</div>`:""}</div>`;
   // 계좌가 통째로 누락되면 원금이 크게 틀어지므로 계좌별 내역을 항상 노출한다
   const tradeAccts=Object.keys(byAcct||{});
   const names=sums.map(s=>s.account).concat(tradeAccts.filter(k=>!sums.some(s=>s.account===k)));
@@ -1327,6 +1342,14 @@ function investedAt(ymd8,fallback){
   cashFlows.forEach(f=>{if(f.type!=="div"&&f.date<=k)net+=(f.type==="out"?-f.amt:f.amt);});
   return net;
 }
+// 수익률 분모는 누적 입금액(출금을 빼지 않음). 인출해도 성과가 나빠 보이지 않게 한다.
+function depositedAt(ymd8,fallback){
+  if(!cashFlows.length)return fallback;
+  const k=ymd8.slice(0,4)+"-"+ymd8.slice(4,6)+"-"+ymd8.slice(6,8);
+  let v=0;
+  cashFlows.forEach(f=>{if(f.type==="in"&&f.date<=k)v+=f.amt;});
+  return v||fallback;
+}
 
 /* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
 let eqChart=null;
@@ -1417,9 +1440,11 @@ async function loadEquity(ev){
     if(assets.length)assets[assets.length-1]=nowEval+cash0;
     // 입출금 기록이 있으면 원금선을 날짜별 계단으로, 없으면 기존처럼 일정하게 그린다
     const investLine=days.map(d=>investedAt(d,invested));
+    const rateLine=days.map(d=>depositedAt(d,invested)); // 수익률 분모(누적 입금)
     drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine,
-      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)));
+      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine);
     const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
+    const rBase=rateLine[rateLine.length-1]||base; // 수익률 분모는 누적 입금액
     // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
     const noPx=codes.filter(c=>!px[c]||!Object.keys(px[c]).length);
     // 보유종목에 없으면 체결내역에서 이름을 찾는다. 코드만 보이면 정체를 알 수 없다.
@@ -1439,7 +1464,7 @@ async function loadEquity(ev){
     const gap=assets[0]-investLine[0];
     const mismatch=cashFlows.length?base-invested:0; // 기록 순입금과 역산 원금의 차이
     $("eqNote").innerHTML=`원금 ${wonKR(base)} · 현재 ${wonKR(cur)} · `
-      +`<b style="color:${p>=0?"var(--accent2)":"var(--danger)"}">${p>=0?"+":""}${wonKR(p)} (${(base?p/base*100:0).toFixed(2)}%)</b>`
+      +`<b style="color:${p>=0?"var(--accent2)":"var(--danger)"}">${p>=0?"+":""}${wonKR(p)} (${(rBase?p/rBase*100:0).toFixed(2)}%)</b>`
       +(Math.abs(gap)>Math.max(investLine[0],1)*0.02
         ? `<br><span style="color:#f5a623">시작일 자산이 그때 원금과 ${wonKR(Math.abs(gap))} 차이 납니다 — 시세 누락이나 입출금 기록 누락을 확인하세요.</span>`:"")
       +(Math.abs(mismatch)>Math.max(invested,1)*0.02
@@ -1451,7 +1476,7 @@ async function loadEquity(ev){
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
   finally{if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
-function drawEquity(labels,assets,investLine,fullDates){
+function drawEquity(labels,assets,investLine,fullDates,rateLine){
   const ctx=$("eqChart").getContext("2d");
   if(eqChart)eqChart.destroy();
   const up=assets[assets.length-1]>=investLine[investLine.length-1];
@@ -1480,7 +1505,8 @@ function drawEquity(labels,assets,investLine,fullDates){
             label:c=>" "+c.dataset.label+" "+won(c.parsed.y),
             footer:it=>{
               const i=it[0].dataIndex, p=assets[i]-investLine[i];
-              const r=investLine[i]?(p/investLine[i]*100).toFixed(2):"0.00";
+              const base=(rateLine&&rateLine[i])||investLine[i];
+              const r=base?(p/base*100).toFixed(2):"0.00";
               return "손익 "+(p>=0?"+":"")+won(p)+" ("+(p>=0?"+":"")+r+"%)";
             }
           }
