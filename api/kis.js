@@ -4,6 +4,7 @@
 //   /api/kis?symbol=005930                 → 현재가/지표
 //   /api/kis?action=daily&symbol=005930    → 최근 일봉(과거 시세)
 //   /api/kis?action=finance&symbol=005930  → 재무비율(ROE·부채비율 등)
+//   /api/kis?action=trades&from=YYYYMMDD&to=YYYYMMDD → 기간 내 체결내역
 
 const IS_MOCK = /^(mock|vts|모의)$/i.test(process.env.KIS_ENV || "");
 const BASE = IS_MOCK
@@ -174,6 +175,7 @@ function acctConfigs() {
   return list.filter((a) => a.no.length >= 10);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const isRate = (m) => /초당|거래건수|EGW00201|초과/.test(m || ""); // 초당 호출 제한 응답 판정
 async function balanceOnce(a, trId) {
   const token = await getTokenFor(a.key, a.secret); // 계좌별 키로 토큰
   const q = new URLSearchParams({
@@ -190,7 +192,6 @@ async function getBalance() {
   const trId = IS_MOCK ? "VTTC8434R" : "TTTC8434R";
   const holdings = [];
   const errors = [];
-  const isRate = (m) => /초당|거래건수|EGW00201|초과/.test(m || "");
   for (let i = 0; i < accts.length; i++) {
     const a = accts[i];
     if (i > 0) await sleep(600); // 계좌 간 간격(초당 제한 회피)
@@ -213,6 +214,64 @@ async function getBalance() {
   return { holdings, errors: errors.length ? errors : null };
 }
 
+// --- 주문체결내역 조회 (계좌별 각자의 API 키 사용) ---
+// 조회 시작일이 3개월 이전이면 별도 TR을 쓴다. 3개월 경계를 걸치는 기간은 단일 TR로 완전히 커버되지 않을 수 있다.
+function tradeTrId(fromYmd) {
+  const limit = new Date();
+  limit.setMonth(limit.getMonth() - 3);
+  const isOld = String(fromYmd) < ymd(limit);
+  if (IS_MOCK) return isOld ? "VTSC9215R" : "VTTC0081R";
+  return isOld ? "CTSC9215R" : "TTTC0081R";
+}
+async function tradesOnce(a, trId, from, to, fk, nk) {
+  const token = await getTokenFor(a.key, a.secret); // 계좌별 키로 토큰
+  const q = new URLSearchParams({
+    CANO: a.no.slice(0, 8), ACNT_PRDT_CD: a.no.slice(8, 10),
+    INQR_STRT_DT: from, INQR_END_DT: to,
+    SLL_BUY_DVSN_CD: "00", PDNO: "", CCLD_DVSN: "01",
+    INQR_DVSN: "00", INQR_DVSN_1: "", INQR_DVSN_3: "00",
+    ORD_GNO_BRNO: "", ODNO: "", EXCG_ID_DVSN_CD: "KRX",
+    CTX_AREA_FK100: fk, CTX_AREA_NK100: nk,
+  }).toString();
+  const url = BASE + "/uapi/domestic-stock/v1/trading/inquire-daily-ccld?" + q;
+  const h = headers(token, trId, a.key, a.secret);
+  if (fk || nk) h.tr_cont = "N"; // 다음 페이지 요청
+  const r = await fetch(url, { headers: h });
+  return { json: await r.json(), trCont: r.headers.get("tr_cont") || "" };
+}
+async function getTrades(from, to) {
+  const accts = acctConfigs();
+  if (!accts.length) return { error: "계좌가 설정되지 않았습니다 (KIS_ACCT1_NO 등)" };
+  const trId = tradeTrId(from);
+  const trades = [];
+  const errors = [];
+  for (let i = 0; i < accts.length; i++) {
+    const a = accts[i];
+    if (i > 0) await sleep(600); // 계좌 간 간격(초당 제한 회피)
+    try {
+      let fk = "", nk = "";
+      for (let page = 0; page < 20; page++) { // 연속조회 무한루프 방지
+        if (page > 0) await sleep(200);
+        let { json: j, trCont } = await tradesOnce(a, trId, from, to, fk, nk);
+        // 초당 제한이면 잠시 후 같은 페이지를 1회 재시도
+        if (j.rt_cd !== "0" && isRate(j.msg1)) {
+          await sleep(1000);
+          ({ json: j, trCont } = await tradesOnce(a, trId, from, to, fk, nk));
+        }
+        if (j.rt_cd !== "0") { errors.push(a.label + ": " + (j.msg1 || "조회 실패")); break; }
+        // 체결내역 필드명이 확정되지 않아 임의 변환 없이 원본 키를 그대로 보존한다
+        (j.output1 || []).forEach((o) => trades.push({ account: a.label, ...o }));
+        if (trCont !== "M" && trCont !== "F") break;
+        const o2 = j.output2 || {};
+        fk = o2.ctx_area_fk100 || "";
+        nk = o2.ctx_area_nk100 || "";
+        if (!fk && !nk) break; // 연속키가 없으면 더 받을 수 없음
+      }
+    } catch (e) { errors.push(a.label + ": " + e.message); }
+  }
+  return { trades, from, to, trId, errors: errors.length ? errors : null };
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try {
@@ -222,6 +281,17 @@ module.exports = async function handler(req, res) {
 
     // 잔고조회는 종목코드 불필요
     if (action === "balance") { res.status(200).json(await getBalance()); return; }
+
+    // 체결내역도 종목코드 불필요 (기간만 사용)
+    if (action === "trades") {
+      const end = new Date();
+      const start = new Date(); start.setMonth(start.getMonth() - 3); // 기본 3개월
+      const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def);
+      const from = dt(String(req.query.from || ""), ymd(start));
+      const to = dt(String(req.query.to || ""), ymd(end));
+      res.status(200).json(await getTrades(from, to));
+      return;
+    }
 
     const symbol = String(req.query.symbol || "").trim();
     if (!/^\d{6}$/.test(symbol))
