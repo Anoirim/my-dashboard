@@ -227,6 +227,23 @@
       <div id="holdingsWrap" style="overflow-x:auto"></div>
     </div>
 
+    <!-- 거래내역 (체결 기록) -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#c77dff"></span>거래내역 (체결 기록)</h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="date" id="trFrom" style="width:160px">
+        <input type="date" id="trTo" style="width:160px">
+        <button onclick="loadTrades(event)">불러오기</button>
+        <select id="trSide" onchange="renderTrades(lastTrades)" style="width:110px">
+          <option value="all">전체</option>
+          <option value="buy">매수</option>
+          <option value="sell">매도</option>
+        </select>
+        <span class="hint" id="trMsg" style="margin:0"></span>
+      </div>
+      <div id="tradesWrap" style="overflow-x:auto"></div>
+    </div>
+
     <!-- 월 지출 관리 -->
     <div class="card full">
       <h2><span class="dot" style="background:#ff8fab"></span>월 지출 관리</h2>
@@ -954,6 +971,102 @@ function renderHoldings(hs){
       <td style="color:var(--accent2)">${won(totTarget)}</td>
     </tr></tfoot>
   </table>`;
+}
+
+/* ===== 거래내역 (체결 기록) ===== */
+let lastTrades=[], tradesBusy=false;
+// KIS 응답 필드명이 확정되지 않아, 후보 키를 순서대로 훑어 처음 나오는 값을 쓴다
+const pickTr=(o,keys)=>{for(const k of keys){if(o[k]!=null&&o[k]!=="")return o[k];}return null;};
+const TR_F={
+  date:["ord_dt","orddt","trad_dt","stck_bsop_date","ccld_dt"],
+  code:["pdno","PDNO"],
+  name:["prdt_name","prdt_abrv_name","hts_kor_isnm"],
+  sideName:["sll_buy_dvsn_cd_name","sll_buy_dvsn_name"],
+  sideCode:["sll_buy_dvsn_cd"],
+  qty:["tot_ccld_qty","ccld_qty","ord_qty"],
+  price:["avg_prvs","ccld_prvs","ccld_unpr","ord_unpr"],
+  amt:["tot_ccld_amt","ccld_amt"]
+};
+function initTradeDates(){
+  const d=new Date();
+  $("trTo").value=d.toLocaleDateString("sv-SE");
+  d.setMonth(d.getMonth()-3);
+  $("trFrom").value=d.toLocaleDateString("sv-SE");
+}
+initTradeDates();
+
+async function loadTrades(ev){
+  if(tradesBusy)return;
+  tradesBusy=true;
+  const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
+  const msg=$("trMsg");msg.textContent="불러오는 중...";
+  try{
+    const from=($("trFrom").value||"").replace(/-/g,""), to=($("trTo").value||"").replace(/-/g,"");
+    const r=await fetch(KIS_PROXY+"?action=trades&from="+from+"&to="+to).then(x=>x.json());
+    if(r.error){msg.textContent="오류: "+r.error;return;}
+    lastTrades=r.trades||[];
+    renderTrades(lastTrades);
+    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
+  }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
+  finally{tradesBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
+}
+function renderTrades(list){
+  list=list||[];
+  const wrap=$("tradesWrap");
+  if(!list.length){wrap.innerHTML='<div class="hint">해당 기간에 체결 내역이 없어요.</div>';return;}
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR");
+  const ymdDash=v=>{const s=String(v||"");return /^\d{8}$/.test(s)?s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8):(s||"-");};
+  const filter=$("trSide").value;
+  let rows=list.map(o=>{
+    const qty=parseFloat(pickTr(o,TR_F.qty))||0;
+    const price=parseFloat(pickTr(o,TR_F.price))||0;
+    const rawAmt=parseFloat(pickTr(o,TR_F.amt));
+    const calc=!(rawAmt>0);
+    const code=pickTr(o,TR_F.sideCode);
+    const nm=pickTr(o,TR_F.sideName);
+    const side=nm?String(nm):(code==="01"?"매도":code==="02"?"매수":null);
+    return{
+      date:String(pickTr(o,TR_F.date)||""),
+      account:o.account||"-",
+      code:pickTr(o,TR_F.code)||"",
+      name:pickTr(o,TR_F.name)||"",
+      side,sell:side?side.includes("매도"):false,
+      qty,price,amt:calc?qty*price:rawAmt,calc
+    };
+  }).filter(t=>t.qty>0); // 수량 0 = 미체결
+  if(filter==="buy")rows=rows.filter(t=>t.side&&!t.sell);
+  else if(filter==="sell")rows=rows.filter(t=>t.sell);
+  rows.sort((a,b)=>b.date.localeCompare(a.date));
+  let buyAmt=0,sellAmt=0;
+  const body=rows.map(t=>{
+    if(t.side)t.sell?sellAmt+=t.amt:buyAmt+=t.amt;
+    return `<tr>
+      <td class="l">${ymdDash(t.date)}</td>
+      <td class="l"><span class="acct">${esc(String(t.account))}</span></td>
+      <td class="l">${esc(String(t.name))||"-"}<span style="color:var(--muted);font-size:11px"> ${esc(String(t.code))}</span></td>
+      <td class="l ${t.side?(t.sell?"down":"up"):""}">${t.side?esc(t.side):"-"}</td>
+      <td>${t.qty.toLocaleString()}</td>
+      <td>${won(t.price)}</td>
+      <td>${won(t.amt)}${t.calc?'<span style="color:var(--muted);font-size:11px"> ≈</span>':""}</td>
+    </tr>`;
+  }).join("");
+  wrap.innerHTML=`<table class="htbl">
+    <thead><tr>
+      <th class="l">체결일</th><th class="l">계좌</th><th class="l">종목</th><th class="l">구분</th>
+      <th>수량</th><th>단가</th><th>금액</th>
+    </tr></thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr>
+      <td class="l" colspan="4">합계 <span style="color:var(--muted);font-weight:400">· ${rows.length}건</span></td>
+      <td></td>
+      <td class="up">매수 ${won(buyAmt)}</td>
+      <td class="down">매도 ${won(sellAmt)}</td>
+    </tr></tfoot>
+  </table>
+  <details style="margin-top:10px">
+    <summary class="hint" style="cursor:pointer">원본 응답 필드 보기</summary>
+    <pre style="white-space:pre-wrap;font-size:11px;color:var(--muted);max-height:240px;overflow:auto">${esc(JSON.stringify(list[0],null,2))}</pre>
+  </details>`;
 }
 
 /* ===== 자동 기록 초기화 (마지막에 실행) ===== */
