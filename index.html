@@ -268,8 +268,8 @@
     <div class="card full">
       <h2><span class="dot" style="background:#4f8cff"></span>자산 추이</h2>
       <div class="row" style="margin-bottom:12px;align-items:center">
-        <button onclick="loadEquity(event)">추이 만들기</button>
-        <span class="hint" id="eqMsg" style="margin:0">거래내역을 먼저 불러온 뒤 눌러주세요.</span>
+        <button id="eqBtn" onclick="loadEquity(event)" disabled style="opacity:.5;cursor:not-allowed">추이 만들기</button>
+        <span class="hint" id="eqMsg" style="margin:0">거래내역을 먼저 불러오면 활성화됩니다.</span>
       </div>
       <canvas id="eqChart" height="90"></canvas>
       <div class="hint" id="eqNote" style="margin-top:10px"></div>
@@ -1044,6 +1044,7 @@ async function loadTrades(ev){
     lastTrades=r.trades||[];
     lastBal=(b&&!b.error)?b:null;
     renderTrades(lastTrades);
+    setEquityReady(lastTrades.length>0&&!!lastBal);
     const errs=[].concat(r.errors||[],(b&&b.errors)||[],(b&&b.error)?["잔고: "+b.error]:[]);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(errs.length?(" · 계좌 오류: "+errs.join(" / ")):"");
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
@@ -1220,6 +1221,14 @@ function investedAt(ymd8,fallback){
 
 /* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
 let eqChart=null;
+// 체결내역과 잔고가 모두 있어야 추이를 만들 수 있다. 그전엔 버튼을 잠근다.
+function setEquityReady(ok){
+  const b=$("eqBtn");
+  b.disabled=!ok;
+  b.style.opacity=ok?1:.5;
+  b.style.cursor=ok?"pointer":"not-allowed";
+  if(!ok)$("eqMsg").textContent="거래내역을 먼저 불러오면 활성화됩니다.";
+}
 // 재구성은 배당·입출금을 모르니 근사치다. 실제로 본 값은 하루 1건 스냅샷으로 남겨 덮어쓴다.
 function saveSnapshot(asset,invested){
   const s=JSON.parse(localStorage.getItem("equitySnap")||"{}");
