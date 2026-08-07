@@ -192,6 +192,8 @@ async function getBalance() {
   const trId = IS_MOCK ? "VTTC8434R" : "TTTC8434R";
   const holdings = [];
   const errors = [];
+  const summary = [];
+  let raw2 = null;
   for (let i = 0; i < accts.length; i++) {
     const a = accts[i];
     if (i > 0) await sleep(600); // 계좌 간 간격(초당 제한 회피)
@@ -209,9 +211,27 @@ async function getBalance() {
           evalAmt: num(o.evlu_amt), pnl: num(o.evlu_pfls_amt), pnlRate: num(o.evlu_pfls_rt),
         });
       });
+      // 예수금·순자산은 output2에 있다(계좌 요약). 총손익 계산에 필요해 함께 반환한다.
+      const o2 = Array.isArray(j.output2) ? (j.output2[0] || {}) : (j.output2 || {});
+      if (!raw2) raw2 = o2; // 필드명 확인용 원본 1건 보존
+      summary.push({
+        account: a.label,
+        cash: num(o2.dnca_tot_amt),          // 예수금총금액
+        cashD2: num(o2.prvs_rcdl_excc_amt),  // 가수도정산금액(D+2)
+        stockEval: num(o2.scts_evlu_amt),    // 유가평가금액
+        totalEval: num(o2.tot_evlu_amt),     // 총평가금액
+        netAsset: num(o2.nass_amt),          // 순자산금액
+        purchase: num(o2.pchs_amt_smtl_amt), // 매입금액합계
+        evalPnl: num(o2.evlu_pfls_smtl_amt), // 평가손익합계
+      });
     } catch (e) { errors.push(a.label + ": " + e.message); }
   }
-  return { holdings, errors: errors.length ? errors : null };
+  const sum = (k) => summary.reduce((s, x) => s + (x[k] || 0), 0);
+  return {
+    holdings, summary, raw2,
+    cash: sum("cash"), netAsset: sum("netAsset"), stockEval: sum("stockEval"),
+    errors: errors.length ? errors : null,
+  };
 }
 
 // --- 주문체결내역 조회 (계좌별 각자의 API 키 사용) ---
@@ -239,37 +259,60 @@ async function tradesOnce(a, trId, from, to, fk, nk) {
   const r = await fetch(url, { headers: h });
   return { json: await r.json(), trCont: r.headers.get("tr_cont") || "" };
 }
+// KIS는 3개월 경계로 TR이 갈려 긴 기간을 한 번에 못 받는다. 3개월 미만 구간으로 잘라 순차 조회한다.
+const parseYmd = (s) => new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
+const fmtYmd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
+function splitPeriods(from, to) {
+  const end = parseYmd(to);
+  const out = [];
+  let cur = parseYmd(from);
+  while (cur <= end && out.length < 24) {
+    const stop = new Date(cur);
+    stop.setUTCMonth(stop.getUTCMonth() + 3);
+    stop.setUTCDate(stop.getUTCDate() - 1);
+    out.push([fmtYmd(cur), fmtYmd(stop > end ? end : stop)]);
+    cur = new Date(stop);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return out;
+}
+async function tradesPaged(a, from, to, trades, errors) {
+  const trId = tradeTrId(from);
+  let fk = "", nk = "";
+  for (let page = 0; page < 20; page++) { // 연속조회 무한루프 방지
+    if (page > 0) await sleep(200);
+    let { json: j, trCont } = await tradesOnce(a, trId, from, to, fk, nk);
+    // 초당 제한이면 잠시 후 같은 페이지를 1회 재시도
+    if (j.rt_cd !== "0" && isRate(j.msg1)) {
+      await sleep(1000);
+      ({ json: j, trCont } = await tradesOnce(a, trId, from, to, fk, nk));
+    }
+    if (j.rt_cd !== "0") { errors.push(a.label + " " + from + ": " + (j.msg1 || "조회 실패")); return; }
+    // 체결내역 필드명이 확정되지 않아 임의 변환 없이 원본 키를 그대로 보존한다
+    (j.output1 || []).forEach((o) => trades.push({ account: a.label, ...o }));
+    if (trCont !== "M" && trCont !== "F") return;
+    const o2 = j.output2 || {};
+    fk = o2.ctx_area_fk100 || "";
+    nk = o2.ctx_area_nk100 || "";
+    if (!fk && !nk) return; // 연속키가 없으면 더 받을 수 없음
+  }
+}
 async function getTrades(from, to) {
   const accts = acctConfigs();
   if (!accts.length) return { error: "계좌가 설정되지 않았습니다 (KIS_ACCT1_NO 등)" };
-  const trId = tradeTrId(from);
+  const periods = splitPeriods(from, to);
   const trades = [];
   const errors = [];
   for (let i = 0; i < accts.length; i++) {
     const a = accts[i];
     if (i > 0) await sleep(600); // 계좌 간 간격(초당 제한 회피)
-    try {
-      let fk = "", nk = "";
-      for (let page = 0; page < 20; page++) { // 연속조회 무한루프 방지
-        if (page > 0) await sleep(200);
-        let { json: j, trCont } = await tradesOnce(a, trId, from, to, fk, nk);
-        // 초당 제한이면 잠시 후 같은 페이지를 1회 재시도
-        if (j.rt_cd !== "0" && isRate(j.msg1)) {
-          await sleep(1000);
-          ({ json: j, trCont } = await tradesOnce(a, trId, from, to, fk, nk));
-        }
-        if (j.rt_cd !== "0") { errors.push(a.label + ": " + (j.msg1 || "조회 실패")); break; }
-        // 체결내역 필드명이 확정되지 않아 임의 변환 없이 원본 키를 그대로 보존한다
-        (j.output1 || []).forEach((o) => trades.push({ account: a.label, ...o }));
-        if (trCont !== "M" && trCont !== "F") break;
-        const o2 = j.output2 || {};
-        fk = o2.ctx_area_fk100 || "";
-        nk = o2.ctx_area_nk100 || "";
-        if (!fk && !nk) break; // 연속키가 없으면 더 받을 수 없음
-      }
-    } catch (e) { errors.push(a.label + ": " + e.message); }
+    for (let p = 0; p < periods.length; p++) {
+      if (p > 0) await sleep(250);
+      try { await tradesPaged(a, periods[p][0], periods[p][1], trades, errors); }
+      catch (e) { errors.push(a.label + ": " + e.message); }
+    }
   }
-  return { trades, from, to, trId, errors: errors.length ? errors : null };
+  return { trades, from, to, periods, errors: errors.length ? errors : null };
 }
 
 module.exports = async function handler(req, res) {

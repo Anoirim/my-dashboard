@@ -241,6 +241,8 @@
         </select>
         <span class="hint" id="trMsg" style="margin:0"></span>
       </div>
+      <div class="exp-sum" id="pnlSum"></div>
+      <div class="hint" id="pnlNote" style="margin-bottom:14px"></div>
       <div id="tradesWrap" style="overflow-x:auto"></div>
     </div>
 
@@ -974,7 +976,7 @@ function renderHoldings(hs){
 }
 
 /* ===== 거래내역 (체결 기록) ===== */
-let lastTrades=[], tradesBusy=false;
+let lastTrades=[], lastBal=null, tradesBusy=false;
 // KIS 응답 필드명이 확정되지 않아, 후보 키를 순서대로 훑어 처음 나오는 값을 쓴다
 const pickTr=(o,keys)=>{for(const k of keys){if(o[k]!=null&&o[k]!=="")return o[k];}return null;};
 const TR_F={
@@ -987,11 +989,10 @@ const TR_F={
   price:["avg_prvs","ccld_prvs","ccld_unpr","ord_unpr"],
   amt:["tot_ccld_amt","ccld_amt"]
 };
+const TRADE_START="2026-01-01"; // 계좌 거래 시작 시점
 function initTradeDates(){
-  const d=new Date();
-  $("trTo").value=d.toLocaleDateString("sv-SE");
-  d.setMonth(d.getMonth()-3);
-  $("trFrom").value=d.toLocaleDateString("sv-SE");
+  $("trTo").value=new Date().toLocaleDateString("sv-SE");
+  $("trFrom").value=TRADE_START;
 }
 initTradeDates();
 
@@ -999,21 +1000,51 @@ async function loadTrades(ev){
   if(tradesBusy)return;
   tradesBusy=true;
   const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
-  const msg=$("trMsg");msg.textContent="불러오는 중...";
+  const msg=$("trMsg");msg.textContent="불러오는 중... (기간이 길면 20초 정도 걸려요)";
   try{
     const from=($("trFrom").value||"").replace(/-/g,""), to=($("trTo").value||"").replace(/-/g,"");
-    const r=await fetch(KIS_PROXY+"?action=trades&from="+from+"&to="+to).then(x=>x.json());
+    // 총손익은 체결내역 + 현재 잔고를 함께 써야 나오므로 두 API를 같이 부른다
+    const [r,b]=await Promise.all([
+      fetch(KIS_PROXY+"?action=trades&from="+from+"&to="+to).then(x=>x.json()),
+      fetch(KIS_PROXY+"?action=balance").then(x=>x.json()).catch(()=>null)
+    ]);
     if(r.error){msg.textContent="오류: "+r.error;return;}
     lastTrades=r.trades||[];
+    lastBal=(b&&!b.error)?b:null;
     renderTrades(lastTrades);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
   finally{tradesBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
+
+/* --- 총괄 손익: 넣은 돈 대비 지금 얼마인가 --- */
+// 투입원금 = 매수합 - 매도합 + 예수금,  총손익 = 평가금액 - 매수합 + 매도합
+function renderPnl(buyAmt,sellAmt){
+  const box=$("pnlSum"),note=$("pnlNote");
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR")+"원";
+  if(!lastBal){box.innerHTML="";note.textContent="잔고를 못 불러와 총손익을 계산하지 못했어요.";return;}
+  const evalSum=lastBal.stockEval||(lastBal.holdings||[]).reduce((s,h)=>s+(h.evalAmt||0),0);
+  const cash=lastBal.cash||0;
+  const invested=buyAmt-sellAmt+cash;
+  const asset=evalSum+cash;
+  const pnl=asset-invested;
+  const rate=invested>0?(pnl/invested*100):0;
+  // .exp-box.total .num 이 색을 덮어써서 인라인으로 지정한다
+  const c=pnl>=0?"var(--accent2)":"var(--danger)";
+  box.innerHTML=`
+    <div class="exp-box"><div class="lbl">투입 원금(추정)</div><div class="num">${won(invested)}</div>
+      <div class="lbl" style="margin:4px 0 0">순매수 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}</div></div>
+    <div class="exp-box"><div class="lbl">현재 총자산</div><div class="num">${won(asset)}</div>
+      <div class="lbl" style="margin:4px 0 0">주식 ${won(evalSum)} + 현금 ${won(cash)}</div></div>
+    <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div></div>
+    <div class="exp-box total" style="border-color:${c}"><div class="lbl">총수익률</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${rate.toFixed(2)}%</div></div>`;
+  note.innerHTML=`매수 ${won(buyAmt)} · 매도 ${won(sellAmt)} · 예수금 ${won(cash)} · 주식평가 ${won(evalSum)}`
+    +(cash?"":' <span style="color:#f5a623">— 예수금이 0으로 잡혀 원금이 실제보다 적게 나올 수 있어요</span>')
+    +"<br>배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요.";
+}
 function renderTrades(list){
   list=list||[];
   const wrap=$("tradesWrap");
-  if(!list.length){wrap.innerHTML='<div class="hint">해당 기간에 체결 내역이 없어요.</div>';return;}
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const ymdDash=v=>{const s=String(v||"");return /^\d{8}$/.test(s)?s.slice(0,4)+"-"+s.slice(4,6)+"-"+s.slice(6,8):(s||"-");};
   const filter=$("trSide").value;
@@ -1034,6 +1065,11 @@ function renderTrades(list){
       qty,price,amt:calc?qty*price:rawAmt,calc
     };
   }).filter(t=>t.qty>0); // 수량 0 = 미체결
+  // 총손익 요약은 화면 필터와 무관하게 항상 기간 전체 기준으로 계산한다
+  let allBuy=0,allSell=0;
+  rows.forEach(t=>{if(t.side)t.sell?allSell+=t.amt:allBuy+=t.amt;});
+  renderPnl(allBuy,allSell);
+  if(!rows.length){wrap.innerHTML='<div class="hint">해당 기간에 체결 내역이 없어요.</div>';return;}
   if(filter==="buy")rows=rows.filter(t=>t.side&&!t.sell);
   else if(filter==="sell")rows=rows.filter(t=>t.sell);
   rows.sort((a,b)=>b.date.localeCompare(a.date));
