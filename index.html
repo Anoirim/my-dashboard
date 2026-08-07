@@ -1065,7 +1065,8 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const cash=lastBal.cash||0;
   const cfDiv=cfTotals().div; // 배당은 원금이 아니라 수익
   const invested=buyAmt-sellAmt+cash-cfDiv;
-  const asset=evalSum+cash;
+  // 증권사가 계산한 순자산(nass_amt)이 있으면 그 값을 쓴다. 미수·정산 대기분까지 반영돼 앱 표시값과 맞는다.
+  const asset=lastBal.netAsset||(evalSum+cash);
   const pnl=asset-invested;
   const rate=invested>0?(pnl/invested*100):0;
   if(invested>0)saveSnapshot(asset,invested); // 오늘 값은 재구성보다 정확하므로 추이용으로 남긴다
@@ -1075,7 +1076,7 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     <div class="exp-box"><div class="lbl">투입 원금(추정)</div><div class="num">${won(invested)}</div>
       <div class="lbl" style="margin:4px 0 0">순투입 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}${cfDiv?" − 배당 "+won(cfDiv):""}</div></div>
     <div class="exp-box"><div class="lbl">현재 총자산</div><div class="num">${won(asset)}</div>
-      <div class="lbl" style="margin:4px 0 0">주식 ${won(evalSum)} + 현금 ${won(cash)}</div></div>
+      <div class="lbl" style="margin:4px 0 0">${lastBal.netAsset?"증권사 순자산 기준 · 주식 "+won(evalSum)+" + 현금 "+won(cash):"주식 "+won(evalSum)+" + 현금 "+won(cash)}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총수익률</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${rate.toFixed(2)}%</div></div>`;
   // 계좌가 통째로 누락되면 원금이 크게 틀어지므로 계좌별 내역을 항상 노출한다
@@ -1084,30 +1085,32 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const lines=names.map(n=>{
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
     const ev=s?evalOf(s):0, ca=s?(s.cash||0):0;
-    const inv=t.buy-t.sell+ca, ast=ev+ca, p=ast-inv, rt=inv>0?(p/inv*100):0;
+    const inv=t.buy-t.sell+ca, ast=(s&&s.netAsset)||(ev+ca), p=ast-inv, rt=inv>0?(p/inv*100):0;
     const pc=p>=0?"var(--accent2)":"var(--danger)";
     const warn=!s?' <span style="color:#f5a623">← 잔고 조회 실패</span>':(!t.n?' <span style="color:#f5a623">← 체결내역 0건</span>':"");
     return `<b>${esc(n)}</b> 투입 ${won(inv)} → 자산 ${won(ast)} `
       +`<b style="color:${pc}">${p>=0?"+":""}${won(p)} (${p>=0?"+":""}${rt.toFixed(2)}%)</b>${warn}`;
   }).join("<br>");
   // 누계를 그냥 나열하면 손익과 무관한 숫자로 오해된다. 어떻게 원금이 나왔는지 검산식으로 보인다.
-  const proof=(n,buy,sell,ca,ev,cnt)=>{
-    const net=buy-sell;
+  const proof=(n,buy,sell,ca,ev,cnt,na)=>{
+    const net=buy-sell, ast=na||(ev+ca), gap=ast-(ev+ca);
     return `<b>${esc(n)}</b>${cnt!=null?` <span style="color:var(--muted)">체결 ${cnt}건</span>`:""}`
       +`<br><span style="padding-left:10px">순투입 ${won(net)} = 매수 ${won(buy)} − 매도 ${won(sell)}</span>`
       +`<br><span style="padding-left:10px">투입원금 ${won(net+ca)} = 순투입 + 현금 ${won(ca)}</span>`
-      +`<br><span style="padding-left:10px">총자산 ${won(ev+ca)} = 주식 ${won(ev)} + 현금 ${won(ca)}</span>`
-      +`<br><span style="padding-left:10px">손익 ${won(ev-net)} = 총자산 − 투입원금 (현금은 상쇄)</span>`;
+      +`<br><span style="padding-left:10px">총자산 ${won(ast)} = ${na?`증권사 순자산 (주식 ${won(ev)} + 현금 ${won(ca)}보다 ${won(gap)} 많음: 미수·정산 대기분)`:`주식 ${won(ev)} + 현금 ${won(ca)}`}</span>`
+      +`<br><span style="padding-left:10px">손익 ${won(ast-net-ca)} = 총자산 − 투입원금</span>`;
   };
   const detail=names.map(n=>{
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
-    return proof(n,t.buy,t.sell,s?(s.cash||0):0,s?evalOf(s):0,t.n);
+    return proof(n,t.buy,t.sell,s?(s.cash||0):0,s?evalOf(s):0,t.n,s?s.netAsset:0);
   }).join("<br>");
+  // 잔고 원본 필드를 보여줘야 예수금·순자산 항목 차이를 그 자리에서 확인할 수 있다
+  const raw2=lastBal.raw2?`<br><br><b>잔고 응답 원본(첫 계좌)</b><pre style="white-space:pre-wrap;font-size:11px;margin:4px 0 0">${esc(JSON.stringify(lastBal.raw2,null,1))}</pre>`:"";
   note.innerHTML=(lines?lines+"<br>":"")
     +"배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요."
     +(cash?"":' <span style="color:#f5a623">예수금이 0이라 원금이 실제보다 적게 나옵니다.</span>')
     +`<details style="margin-top:6px"><summary style="cursor:pointer">계산 근거 보기</summary>`
-    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null)}</div></details>`;
+    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,lastBal.netAsset)}${raw2}</div></details>`;
 }
 function renderTrades(list){
   list=list||[];
