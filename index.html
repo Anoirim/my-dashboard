@@ -1302,6 +1302,13 @@ async function loadEquity(ev){
     const days=[...new Set(Object.values(px).flatMap(m=>Object.keys(m)))].sort().filter(d=>d>=from);
     if(!days.length){msg.textContent="시세를 못 받아 추이를 만들 수 없어요.";return;}
     const cash0=lastBal.cashD2||lastBal.cash||0; // 요약과 같은 D+2 예수금 기준
+    // 해당 날짜 이후에 들어온 입금·배당은 그 시점엔 없던 돈이다. 되감을 때 빼야 과거 현금이 맞는다.
+    const cfAfter=d=>{
+      const k=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);
+      let v=0;
+      cashFlows.forEach(f=>{if(f.date>k)v+=(f.type==="out"?-f.amt:f.amt);});
+      return v;
+    };
     const buyAll=evs.filter(e=>!e.sell).reduce((s,e)=>s+e.amt,0);
     const sellAll=evs.filter(e=>e.sell).reduce((s,e)=>s+e.amt,0);
     const invested=buyAll-sellAll+cash0-cfTotals().div; // 배당은 원금이 아니므로 제외
@@ -1322,11 +1329,14 @@ async function loadEquity(ev){
         if(px[c]&&px[c][d])lastPx[c]=px[c][d];
         stock+=hold[c]*p;
       });
-      return stock+cash0+restBuy-restSell;
+      return stock+cash0+restBuy-restSell-cfAfter(d);
     });
     // 실제로 확인했던 날은 스냅샷 값이 정확하므로 우선한다
     const snap=JSON.parse(localStorage.getItem("equitySnap")||"{}");
     days.forEach((d,i)=>{const k=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);if(snap[k])assets[i]=snap[k].asset;});
+    // 마지막 점은 재구성값·옛 스냅샷보다 방금 받은 잔고가 정확하므로 마지막에 덮어쓴다
+    const nowEval=lastBal.stockEval||(lastBal.holdings||[]).reduce((s,h)=>s+(h.evalAmt||0),0);
+    if(assets.length)assets[assets.length-1]=nowEval+cash0;
     // 입출금 기록이 있으면 원금선을 날짜별 계단으로, 없으면 기존처럼 일정하게 그린다
     const investLine=days.map(d=>investedAt(d,invested));
     drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine);
