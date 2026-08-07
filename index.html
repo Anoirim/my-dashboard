@@ -246,6 +246,24 @@
       <div id="tradesWrap" style="overflow-x:auto"></div>
     </div>
 
+    <!-- 입출금 · 배당 기록 -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#33d69f"></span>입출금 · 배당 기록</h2>
+      <div class="row" style="margin-bottom:10px">
+        <input type="date" id="cfDate" style="width:160px">
+        <select id="cfType" style="width:100px">
+          <option value="in">입금</option>
+          <option value="out">출금</option>
+          <option value="div">배당</option>
+        </select>
+        <input type="number" id="cfAmt" placeholder="금액(원)" style="width:140px">
+        <input type="text" id="cfMemo" placeholder="메모 (선택)" style="flex:1">
+        <button onclick="addCashFlow()">추가</button>
+      </div>
+      <ul class="sched-list" id="cfList" style="margin-top:0;max-height:260px"></ul>
+      <div class="hint" id="cfSum" style="margin-top:8px"></div>
+    </div>
+
     <!-- 자산 추이 -->
     <div class="card full">
       <h2><span class="dot" style="background:#4f8cff"></span>자산 추이</h2>
@@ -1040,7 +1058,8 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const evalSum=sums.length?sums.reduce((t,s)=>t+evalOf(s),0)
     :(lastBal.holdings||[]).reduce((s,h)=>s+(h.evalAmt||0),0);
   const cash=lastBal.cash||0;
-  const invested=buyAmt-sellAmt+cash;
+  const cfDiv=cfTotals().div; // 배당은 원금이 아니라 수익
+  const invested=buyAmt-sellAmt+cash-cfDiv;
   const asset=evalSum+cash;
   const pnl=asset-invested;
   const rate=invested>0?(pnl/invested*100):0;
@@ -1049,7 +1068,7 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const c=pnl>=0?"var(--accent2)":"var(--danger)";
   box.innerHTML=`
     <div class="exp-box"><div class="lbl">투입 원금(추정)</div><div class="num">${won(invested)}</div>
-      <div class="lbl" style="margin:4px 0 0">순투입 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}</div></div>
+      <div class="lbl" style="margin:4px 0 0">순투입 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}${cfDiv?" − 배당 "+won(cfDiv):""}</div></div>
     <div class="exp-box"><div class="lbl">현재 총자산</div><div class="num">${won(asset)}</div>
       <div class="lbl" style="margin:4px 0 0">주식 ${won(evalSum)} + 현금 ${won(cash)}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div></div>
@@ -1153,6 +1172,48 @@ function renderTrades(list){
   </details>`;
 }
 
+/* ===== 입출금 · 배당 기록 ===== */
+// 배당은 원금이 아니라 수익이다. 역산 원금(매수-매도+현금)에 섞여 들어가므로 빼줘야 손익이 맞다.
+let cashFlows=JSON.parse(localStorage.getItem("cashFlows")||"[]");
+const CF_LABEL={in:"입금",out:"출금",div:"배당"};
+function saveCashFlows(){localStorage.setItem("cashFlows",JSON.stringify(cashFlows));autoSaveFile();}
+function cfTotals(){
+  let inn=0,out=0,div=0;
+  cashFlows.forEach(f=>{f.type==="in"?inn+=f.amt:f.type==="out"?out+=f.amt:div+=f.amt;});
+  return {inn,out,div,net:inn-out};
+}
+function addCashFlow(){
+  const date=$("cfDate").value, amt=parseFloat($("cfAmt").value)||0;
+  if(!date||amt<=0)return;
+  cashFlows.push({date,type:$("cfType").value,amt,memo:$("cfMemo").value.trim()});
+  $("cfAmt").value="";$("cfMemo").value="";
+  saveCashFlows();renderCashFlows();
+}
+function delCashFlow(i){cashFlows.splice(i,1);saveCashFlows();renderCashFlows();}
+function renderCashFlows(){
+  cashFlows.sort((a,b)=>a.date.localeCompare(b.date));
+  $("cfList").innerHTML=cashFlows.map((f,i)=>`
+    <li class="sched-item">
+      <span class="time">${f.date.slice(2)}</span>
+      <span class="cat-tag">${CF_LABEL[f.type]||"기타"}</span>
+      <span class="txt">${esc(f.memo||"")}</span>
+      <span class="exp-amt" style="color:${f.type==="out"?"var(--danger)":"var(--accent2)"}">${f.type==="out"?"-":"+"}${wonKR(f.amt)}</span>
+      <button class="del" onclick="delCashFlow(${i})">✕</button>
+    </li>`).join("")||'<div class="hint">기록이 없습니다. 입금·출금·배당을 넣으면 원금과 손익이 정확해져요.</div>';
+  const t=cfTotals();
+  $("cfSum").innerHTML=`입금 ${wonKR(t.inn)} · 출금 ${wonKR(t.out)} · 배당 ${wonKR(t.div)} · <b>순입금 ${wonKR(t.net)}</b>`
+    +"<br>입금·출금은 자산 추이의 원금선을 계단으로 만들고, 배당은 원금에서 빼 수익으로 잡힙니다.";
+}
+renderCashFlows();
+// 해당 날짜(YYYYMMDD)까지의 누적 순입금. 기록이 없으면 역산값을 그대로 쓴다.
+function investedAt(ymd8,fallback){
+  if(!cashFlows.length)return fallback;
+  const k=ymd8.slice(0,4)+"-"+ymd8.slice(4,6)+"-"+ymd8.slice(6,8);
+  let net=0;
+  cashFlows.forEach(f=>{if(f.type!=="div"&&f.date<=k)net+=(f.type==="out"?-f.amt:f.amt);});
+  return net;
+}
+
 /* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
 let eqChart=null;
 // 재구성은 배당·입출금을 모르니 근사치다. 실제로 본 값은 하루 1건 스냅샷으로 남겨 덮어쓴다.
@@ -1199,7 +1260,7 @@ async function loadEquity(ev){
     const cash0=lastBal.cash||0;
     const buyAll=evs.filter(e=>!e.sell).reduce((s,e)=>s+e.amt,0);
     const sellAll=evs.filter(e=>e.sell).reduce((s,e)=>s+e.amt,0);
-    const invested=buyAll-sellAll+cash0; // 입출금이 없으면 기간 내내 일정하다
+    const invested=buyAll-sellAll+cash0-cfTotals().div; // 배당은 원금이 아니므로 제외
     const hold={},lastPx={};
     let ei=0,restBuy=buyAll,restSell=sellAll; // 해당 날짜 '이후'에 남은 매수·매도액
     const assets=days.map(d=>{
@@ -1222,30 +1283,35 @@ async function loadEquity(ev){
     // 실제로 확인했던 날은 스냅샷 값이 정확하므로 우선한다
     const snap=JSON.parse(localStorage.getItem("equitySnap")||"{}");
     days.forEach((d,i)=>{const k=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);if(snap[k])assets[i]=snap[k].asset;});
-    drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,invested);
-    const cur=assets[assets.length-1],p=cur-invested;
-    // 시작일 자산은 원금과 거의 같아야 정상. 벌어지면 시세 공백을 의심해야 하므로 알린다.
+    // 입출금 기록이 있으면 원금선을 날짜별 계단으로, 없으면 기존처럼 일정하게 그린다
+    const investLine=days.map(d=>investedAt(d,invested));
+    drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine);
+    const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
+    // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
     const noPx=codes.filter(c=>!px[c]||!Object.keys(px[c]).length);
     const nameOf=c=>{const h=(lastBal.holdings||[]).find(x=>x.code===c);return h?h.name+"("+c+")":c;};
-    const gap=assets[0]-invested;
-    $("eqNote").innerHTML=`원금 ${wonKR(invested)} · 현재 ${wonKR(cur)} · `
-      +`<b style="color:${p>=0?"var(--accent2)":"var(--danger)"}">${p>=0?"+":""}${wonKR(p)} (${(invested?p/invested*100:0).toFixed(2)}%)</b>`
-      +(Math.abs(gap)>invested*0.02
-        ? `<br><span style="color:#f5a623">시작일 자산이 원금과 ${wonKR(Math.abs(gap))} 차이 납니다 — 아래 시세 누락 종목을 확인하세요.</span>`:"")
+    const gap=assets[0]-investLine[0];
+    const mismatch=cashFlows.length?base-invested:0; // 기록 순입금과 역산 원금의 차이
+    $("eqNote").innerHTML=`원금 ${wonKR(base)} · 현재 ${wonKR(cur)} · `
+      +`<b style="color:${p>=0?"var(--accent2)":"var(--danger)"}">${p>=0?"+":""}${wonKR(p)} (${(base?p/base*100:0).toFixed(2)}%)</b>`
+      +(Math.abs(gap)>Math.max(investLine[0],1)*0.02
+        ? `<br><span style="color:#f5a623">시작일 자산이 그때 원금과 ${wonKR(Math.abs(gap))} 차이 납니다 — 시세 누락이나 입출금 기록 누락을 확인하세요.</span>`:"")
+      +(Math.abs(mismatch)>Math.max(invested,1)*0.02
+        ? `<br><span style="color:#f5a623">입력한 순입금이 계좌에서 역산한 원금과 ${wonKR(Math.abs(mismatch))} 차이 납니다 — 빠뜨린 입출금이 있는지 보세요.</span>`:"")
       +(noPx.length?`<br><span style="color:#f5a623">시세를 못 받은 종목: ${noPx.map(c=>esc(nameOf(c))).join(", ")} (체결 단가로 대체 평가)</span>`:"")
-      +`<br>입출금이 없다고 보고 원금을 일정하게 그렸어요. 배당·추가입금이 있으면 실제와 달라집니다.`;
+      +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`;
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
   finally{if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
-function drawEquity(labels,assets,invested){
+function drawEquity(labels,assets,investLine){
   const ctx=$("eqChart").getContext("2d");
   if(eqChart)eqChart.destroy();
-  const up=assets[assets.length-1]>=invested;
+  const up=assets[assets.length-1]>=investLine[investLine.length-1];
   eqChart=new Chart(ctx,{type:"line",
     data:{labels,datasets:[
       {label:"총자산",data:assets,borderColor:up?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,tension:.15},
-      {label:"투입 원금",data:labels.map(()=>invested),borderColor:"#8b97ad",borderDash:[6,4],borderWidth:1.5,pointRadius:0}
+      {label:"투입 원금",data:investLine,borderColor:"#8b97ad",borderDash:[6,4],borderWidth:1.5,pointRadius:0,stepped:true}
     ]},
     options:{plugins:{legend:{labels:{color:"#8b97ad"}}},
       scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
