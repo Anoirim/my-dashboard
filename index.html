@@ -1087,9 +1087,10 @@ function renderCashOut(picks,solo,ctx){
   </tr>`;
   const head=extra=>`<thead><tr><th class="l">계좌</th><th class="l">종목</th><th>팔 수량</th>
     <th>현재가</th><th>실수령액</th><th>실현손익</th><th>남는 수량</th>${extra?'<th class="l">비고</th>':""}</tr></thead>`;
-  const d2extra=Math.max(0,cashD2-cashNow); // 이틀 뒤면 더 쓸 수 있는 현금
+  // 예수금 총액과 출금가능액의 차이. 외화 등 원화로 바로 못 쓰는 몫이라 매도 계산에선 제외한다.
+  const locked=Math.max(0,cashD2-cashNow);
   $("coWrap").innerHTML=`<div class="hint" style="margin-bottom:8px">목표 ${won(target)} · 보유 현금 ${won(cashNow)} 사용 → <b>매도로 만들 금액 ${won(needCash)}</b>`
-    +(d2extra?` <span style="color:#f5a623">(D+2까지 기다리면 현금 ${won(cashD2)}까지 쓸 수 있어 ${won(d2extra)} 덜 팔아도 됩니다)</span>`:"")+`</div>`
+    +(locked?` <span style="color:#f5a623">(예수금 ${won(cashD2)} 중 ${won(locked)}은 외화 등으로 즉시 인출이 안 돼 계산에서 뺐습니다)</span>`:"")+`</div>`
     +`<div class="exp-label">🎯 조합 매도 (${$("coOrder").selectedOptions[0].text})</div>`
     +`<table class="htbl">${head(0)}<tbody>${picks.map(row).join("")}</tbody>
       <tfoot><tr><td class="l" colspan="4">합계</td><td>${won(cash)}</td><td>${sign(pnl)}</td><td></td></tr></tfoot></table>`
@@ -1153,7 +1154,7 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const evalOf=s=>s.stockEval||(lastBal.holdings||[]).filter(h=>h.account===s.account).reduce((t,h)=>t+(h.evalAmt||0),0);
   const evalSum=sums.length?sums.reduce((t,s)=>t+evalOf(s),0)
     :(lastBal.holdings||[]).reduce((s,h)=>s+(h.evalAmt||0),0);
-  // 증권사 앱이 표시하는 예수금은 D+2 정산 기준이다. 출금가능액을 쓰면 미정산 매도대금이 빠진다.
+  // 증권사 앱 표시 총자산은 예수금 총액 기준이다. 출금가능액을 쓰면 외화 등 원화 미환전분이 빠진다.
   const cash=lastBal.cashD2||lastBal.cash||0;
   const cfDiv=cfTotals().div; // 배당은 원금이 아니라 수익
   const cfNet=cfTotals().net; // 실제 입금 기록이 있으면 역산보다 정확하다
@@ -1209,9 +1210,9 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     ["순자산 nass_amt (현재 사용중)",lastBal.netAsset],
     ["총평가 tot_evlu_amt",lastBal.totalEval],
     ["주식평가 + 예수금",evalSum+cash],
-    ["주식평가 + D+2예수금",evalSum+(lastBal.cashD2||0)],
+    ["주식평가 + 예수금총액",evalSum+(lastBal.cashD2||0)],
     ["예수금 dnca_tot_amt",cash],
-    ["D+2예수금 prvs_rcdl_excc_amt",lastBal.cashD2],
+    ["예수금총액 prvs_rcdl_excc_amt",lastBal.cashD2],
     ["주식평가 scts_evlu_amt",lastBal.stockEval],
     ["매입금액 pchs_amt_smtl_amt",lastBal.purchase],
     ["평가손익 evlu_pfls_smtl_amt",lastBal.evalPnl],
@@ -1403,7 +1404,7 @@ async function loadEquity(ev){
     }
     const days=[...new Set(Object.values(px).flatMap(m=>Object.keys(m)))].sort().filter(d=>d>=from);
     if(!days.length){msg.textContent="시세를 못 받아 추이를 만들 수 없어요.";return;}
-    const cash0=lastBal.cashD2||lastBal.cash||0; // 요약과 같은 D+2 예수금 기준
+    const cash0=lastBal.cashD2||lastBal.cash||0; // 요약과 같은 예수금 총액 기준
     // 해당 날짜 이후에 들어온 입금·배당은 그 시점엔 없던 돈이다. 되감을 때 빼야 과거 현금이 맞는다.
     const cfAfter=d=>{
       const k=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);
