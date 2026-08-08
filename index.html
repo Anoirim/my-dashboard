@@ -337,6 +337,18 @@
 
       <div class="exp-sum" id="expSum" style="margin-top:16px"></div>
       <div class="hint">월 총지출 = 카드 청구액 합계 + 카드 외(계좌·현금) 정기지출. 카드로 내는 정기지출은 카드값에 이미 포함돼 중복 계산되지 않습니다.</div>
+
+      <div class="exp-divider"></div>
+      <div class="exp-label" style="display:flex;justify-content:space-between;align-items:center">
+        <span>📈 월별 지출 추이</span>
+        <select id="expRange" onchange="renderExpChart()" style="width:130px">
+          <option value="12">최근 12개월</option>
+          <option value="6">최근 6개월</option>
+          <option value="0">전체</option>
+        </select>
+      </div>
+      <canvas id="expChart" height="90"></canvas>
+      <div class="hint" id="expChartNote" style="margin-top:8px"></div>
     </div>
   </div>
 
@@ -710,6 +722,53 @@ function renderExpAll(){
   $("expSum").innerHTML=`
     <div class="exp-box"><div class="lbl">기타(카드 비정기)</div><div class="num">${wonKR(cardEtc)}</div></div>
     <div class="exp-box total"><div class="lbl">${curMonth} 총지출 합계</div><div class="num">${wonKR(grandTotal)}</div></div>`;
+  renderExpChart();
+}
+/* --- 월별 지출 추이 --- */
+let expChart=null;
+// renderExpAll과 같은 기준. 카드로 내는 정기지출은 카드값에 포함돼 총지출에서 중복 계산하지 않는다.
+function monthTotals(m){
+  const d=expData[m]||{}, cards=d.cards||[], fixed=d.fixed||[];
+  const cardTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>s+(c.bill||0),0);
+  const names=new Set(cards.filter(c=>c.inc!==false).map(c=>c.name));
+  const cardFixed=fixed.filter(f=>names.has(f.method)).reduce((s,f)=>s+(f.amt||0),0);
+  const nonCardFixed=fixed.filter(f=>f.method==="계좌/현금").reduce((s,f)=>s+(f.amt||0),0);
+  return {card:cardTotal,fixed:cardFixed+nonCardFixed,etc:cardTotal-cardFixed,
+    cardFixed,nonCardFixed,total:cardTotal+nonCardFixed};
+}
+function renderExpChart(){
+  if(!$("expChart"))return;
+  const n=parseInt($("expRange").value)||0;
+  let months=Object.keys(expData).sort();
+  if(n>0)months=months.slice(-n);
+  const t=months.map(monthTotals);
+  if(expChart)expChart.destroy();
+  if(!months.length){$("expChartNote").textContent="기록된 달이 없습니다.";return;}
+  expChart=new Chart($("expChart").getContext("2d"),{
+    data:{labels:months,datasets:[
+      {type:"bar",label:"정기지출",data:t.map(x=>x.fixed),backgroundColor:"#4f8cff",stack:"s",borderRadius:4},
+      {type:"bar",label:"기타(카드 비정기)",data:t.map(x=>x.etc),backgroundColor:"#ff8fab",stack:"s",borderRadius:4},
+      {type:"line",label:"총지출",data:t.map(x=>x.total),borderColor:"#33d69f",backgroundColor:"transparent",
+        borderWidth:2,pointRadius:3,pointHoverRadius:5,tension:.15}
+    ]},
+    options:{
+      interaction:{mode:"index",intersect:false},
+      plugins:{
+        legend:{labels:{color:"#8b97ad"}},
+        tooltip:{backgroundColor:"#1a2130",borderColor:"#2a3346",borderWidth:1,
+          titleColor:"#e6ebf5",bodyColor:"#e6ebf5",padding:10,
+          callbacks:{
+            label:c=>" "+c.dataset.label+" "+wonKR(c.parsed.y),
+            footer:it=>{const x=t[it[0].dataIndex];
+              return "카드값 "+wonKR(x.card)+" (정기 "+wonKR(x.cardFixed)+")\n카드외 정기 "+wonKR(x.nonCardFixed);}
+          }}
+      },
+      scales:{y:{stacked:true,ticks:{color:"#8b97ad",callback:v=>Math.round(v/10000).toLocaleString("ko-KR")+"만"},grid:{color:"#2a3346"}},
+        x:{stacked:true,ticks:{color:"#8b97ad"},grid:{display:false}}}}
+  });
+  const tot=t.map(x=>x.total), avg=tot.reduce((s,v)=>s+v,0)/tot.length;
+  const max=Math.max(...tot), min=Math.min(...tot);
+  $("expChartNote").innerHTML=`${months.length}개월 · 평균 ${wonKR(avg)} · 최대 ${wonKR(max)}(${months[tot.indexOf(max)]}) · 최소 ${wonKR(min)}(${months[tot.indexOf(min)]})`;
 }
 $("cardBill").addEventListener("keydown",e=>{if(e.key==="Enter")addCard();});
 $("fxAmt").addEventListener("keydown",e=>{if(e.key==="Enter")addFixed();});
