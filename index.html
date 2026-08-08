@@ -745,11 +745,13 @@ function renderExpChart(){
   if(expChart)expChart.destroy();
   if(!months.length){$("expChartNote").textContent="기록된 달이 없습니다.";return;}
   expChart=new Chart($("expChart").getContext("2d"),{
+    // order가 작은 데이터셋이 위에 그려진다. 선이 막대에 가리지 않도록 line을 0으로 둔다.
     data:{labels:months,datasets:[
-      {type:"bar",label:"정기지출",data:t.map(x=>x.fixed),backgroundColor:"#4f8cff",stack:"s",borderRadius:4},
-      {type:"bar",label:"기타(카드 비정기)",data:t.map(x=>x.etc),backgroundColor:"#ff8fab",stack:"s",borderRadius:4},
       {type:"line",label:"총지출",data:t.map(x=>x.total),borderColor:"#33d69f",backgroundColor:"transparent",
-        borderWidth:2,pointRadius:3,pointHoverRadius:5,tension:.15}
+        borderWidth:3,pointRadius:4,pointHoverRadius:6,pointBackgroundColor:"#33d69f",
+        pointBorderColor:"#0f1420",pointBorderWidth:2,tension:.15,order:0},
+      {type:"bar",label:"정기지출",data:t.map(x=>x.fixed),backgroundColor:"#4f8cff",stack:"s",borderRadius:4,order:1},
+      {type:"bar",label:"기타(카드 비정기)",data:t.map(x=>x.etc),backgroundColor:"#ff8fab",stack:"s",borderRadius:4,order:1}
     ]},
     options:{
       interaction:{mode:"index",intersect:false},
