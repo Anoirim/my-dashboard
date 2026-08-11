@@ -259,7 +259,16 @@
       </div>
       <div class="exp-sum" id="pnlSum"></div>
       <div class="hint" id="pnlNote" style="margin-bottom:14px"></div>
-      <div id="tradesWrap" style="overflow-x:auto"></div>
+      <div class="row" style="margin:0 0 8px;align-items:center;gap:8px">
+        <span style="color:var(--muted);font-size:13px;font-weight:600">자산 추이</span>
+        <span class="hint" id="eqMsg" style="margin:0">거래내역을 불러오면 자동으로 그려집니다.</span>
+      </div>
+      <canvas id="eqChart" height="90"></canvas>
+      <div class="hint" id="eqNote" style="margin-top:10px"></div>
+      <details open style="margin-top:16px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">체결 내역 표</summary>
+        <div id="tradesWrap" style="overflow-x:auto;margin-top:10px"></div>
+      </details>
     </div>
 
     <!-- 입출금 · 배당 기록 -->
@@ -278,16 +287,6 @@
       </div>
       <ul class="sched-list" id="cfList" style="margin-top:0;max-height:260px"></ul>
       <div class="hint" id="cfSum" style="margin-top:8px"></div>
-    </div>
-
-    <!-- 자산 추이 -->
-    <div class="card full">
-      <h2><span class="dot" style="background:#4f8cff"></span>자산 추이</h2>
-      <div class="row" style="margin-bottom:12px;align-items:center">
-        <span class="hint" id="eqMsg" style="margin:0">거래내역을 불러오면 자동으로 그려집니다.</span>
-      </div>
-      <canvas id="eqChart" height="90"></canvas>
-      <div class="hint" id="eqNote" style="margin-top:10px"></div>
     </div>
 
     <!-- 월 지출 관리 -->
