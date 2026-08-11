@@ -284,8 +284,7 @@
     <div class="card full">
       <h2><span class="dot" style="background:#4f8cff"></span>자산 추이</h2>
       <div class="row" style="margin-bottom:12px;align-items:center">
-        <button id="eqBtn" onclick="loadEquity(event)" disabled style="opacity:.5;cursor:not-allowed">추이 만들기</button>
-        <span class="hint" id="eqMsg" style="margin:0">거래내역을 먼저 불러오면 활성화됩니다.</span>
+        <span class="hint" id="eqMsg" style="margin:0">거래내역을 불러오면 자동으로 그려집니다.</span>
       </div>
       <canvas id="eqChart" height="90"></canvas>
       <div class="hint" id="eqNote" style="margin-top:10px"></div>
@@ -1196,10 +1195,11 @@ async function loadTrades(ev){
     if(r.error){msg.textContent="오류: "+r.error;return;}
     lastTrades=r.trades||[];
     lastBal=(b&&!b.error)?b:null;
+    lastHoldings=(lastBal&&lastBal.holdings)||lastHoldings; // 목표 현금 계산에서 바로 쓰도록
     renderTrades(lastTrades);
-    setEquityReady(lastTrades.length>0&&!!lastBal);
     const errs=[].concat(r.errors||[],(b&&b.errors)||[],(b&&b.error)?["잔고: "+b.error]:[]);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(errs.length?(" · 계좌 오류: "+errs.join(" / ")):"");
+    await loadEquity(); // 추이는 같은 데이터로 만드니 버튼 없이 이어서 그린다
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
   finally{tradesBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
@@ -1416,14 +1416,6 @@ function depositedAt(ymd8,fallback){
 
 /* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
 let eqChart=null;
-// 체결내역과 잔고가 모두 있어야 추이를 만들 수 있다. 그전엔 버튼을 잠근다.
-function setEquityReady(ok){
-  const b=$("eqBtn");
-  b.disabled=!ok;
-  b.style.opacity=ok?1:.5;
-  b.style.cursor=ok?"pointer":"not-allowed";
-  if(!ok)$("eqMsg").textContent="거래내역을 먼저 불러오면 활성화됩니다.";
-}
 // 재구성은 배당·입출금을 모르니 근사치다. 실제로 본 값은 하루 1건 스냅샷으로 남겨 덮어쓴다.
 function saveSnapshot(asset,invested){
   const s=JSON.parse(localStorage.getItem("equitySnap")||"{}");
@@ -1445,10 +1437,10 @@ function tradeEvents(){
   });
   return out.sort((a,b)=>a.date.localeCompare(b.date));
 }
-async function loadEquity(ev){
+// 거래내역 불러오기가 끝나면 이어서 자동 실행된다(별도 버튼 없음)
+async function loadEquity(){
   const msg=$("eqMsg");
-  if(!lastTrades.length||!lastBal){msg.textContent="먼저 위 거래내역에서 '불러오기'를 실행하세요.";return;}
-  const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
+  if(!lastTrades.length||!lastBal){msg.textContent="거래내역을 불러오면 자동으로 그려집니다.";return;}
   try{
     const evs=tradeEvents();
     if(!evs.length){msg.textContent="체결내역이 없어 추이를 만들 수 없어요.";return;}
@@ -1537,7 +1529,6 @@ async function loadEquity(ev){
       +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`;
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
-  finally{if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
 function drawEquity(labels,assets,investLine,fullDates,rateLine){
   const ctx=$("eqChart").getContext("2d");
