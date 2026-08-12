@@ -264,6 +264,7 @@
         <span class="hint" id="eqMsg" style="margin:0">거래내역을 불러오면 자동으로 그려집니다.</span>
       </div>
       <canvas id="eqChart" height="90"></canvas>
+      <div id="eqDetail" class="easy" style="display:none;margin-top:12px"></div>
       <div class="hint" id="eqNote" style="margin-top:10px"></div>
       <details open style="margin-top:16px">
         <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">체결 내역 표</summary>
@@ -1414,7 +1415,60 @@ function depositedAt(ymd8,fallback){
 }
 
 /* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
-let eqChart=null;
+let eqChart=null,eqCtx=null;
+// 지수는 종목 일봉과 휴장일이 어긋날 수 있어 없는 날은 직전 값을 이어 쓴다
+async function loadIndexSeries(days){
+  try{
+    const r=await fetch(KIS_PROXY+"?action=index&code=0001&from="+days[0]+"&to="+days[days.length-1]).then(x=>x.json());
+    const m={};(r.candles||[]).forEach(c=>{m[c.date]=c.close;});
+    if(!Object.keys(m).length)return null;
+    let carry=0;
+    const close=days.map(d=>{if(m[d])carry=m[d];return carry;});
+    const first=close.find(v=>v>0)||0;
+    if(!first)return null;
+    return {close,pct:close.map(v=>v?(v/first-1)*100:0)};
+  }catch(e){return null;}
+}
+// 입출금·배당은 주가 변동이 아니므로 일간 변동률에서 뺀다
+function flowOn(d){
+  const k=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);
+  let v=0;
+  cashFlows.forEach(f=>{if(f.date===k)v+=(f.type==="out"?-f.amt:f.amt);});
+  return v;
+}
+function dailyPct(arr,i,flow){
+  if(i<1||!arr||!arr[i-1])return null;
+  return (arr[i]-arr[i-1]-(flow||0))/arr[i-1]*100;
+}
+// 시장과 얼마나 벌어졌는지가 판단 근거다. 1%p 이내는 시장을 따라간 것으로 본다.
+function verdict(my,ix){
+  if(my===null||ix===null)return "";
+  const a=my-ix;
+  if(Math.abs(a)<=1)return "시장 흐름과 거의 같음";
+  return a>0?`시장보다 선방 (+${a.toFixed(2)}%p)`:`시장보다 부진 (${a.toFixed(2)}%p)`;
+}
+function renderEqDetail(i){
+  const box=$("eqDetail");
+  if(!eqCtx||i==null||!eqCtx.days[i]){box.style.display="none";return;}
+  const {days,assets,investLine,rateLine,idx,holdSnap,nameOf}=eqCtx;
+  const d=days[i],kd=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);
+  const my=dailyPct(assets,i,flowOn(d)),ix=idx?dailyPct(idx.close,i,0):null;
+  const p=assets[i]-investLine[i],base=(rateLine&&rateLine[i])||investLine[i];
+  const col=v=>v>=0?"var(--accent2)":"var(--danger)";
+  const pct=v=>(v>=0?"+":"")+v.toFixed(2)+"%";
+  const rows=Object.keys(holdSnap[i]||{}).map(c=>({c,q:holdSnap[i][c]})).filter(x=>x.q>0);
+  box.innerHTML=`<div class="easy-title">${kd}</div>`
+    +`<div>누적 손익 <b style="color:${col(p)}">${(p>=0?"+":"")+wonKR(p)} (${pct(base?p/base*100:0)})</b>`
+    +` · 총자산 ${wonKR(assets[i])}</div>`
+    +(my===null?`<div style="margin-top:6px;color:var(--muted)">첫날이라 전일 대비 변동을 계산할 수 없어요.</div>`
+      :`<div style="margin-top:6px">당일 내 자산 <b style="color:${col(my)}">${pct(my)}</b>`
+        +(ix===null?` <span style="color:var(--muted)">· 지수 없음</span>`
+          :` / KOSPI <b style="color:${col(ix)}">${pct(ix)}</b> · <b>${verdict(my,ix)}</b>`)+`</div>`)
+    +(rows.length?`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목 ${rows.length}개</div>`
+      +rows.map(x=>`<div style="padding-left:14px">${esc(nameOf(x.c))} · ${x.q.toLocaleString("ko-KR")}주</div>`).join("")
+      :`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목이 없어요.</div>`);
+  box.style.display="block";
+}
 // 재구성은 배당·입출금을 모르니 근사치다. 실제로 본 값은 하루 1건 스냅샷으로 남겨 덮어쓴다.
 function saveSnapshot(asset,invested){
   const s=JSON.parse(localStorage.getItem("equitySnap")||"{}");
@@ -1456,6 +1510,8 @@ async function loadEquity(){
     }
     const days=[...new Set(Object.values(px).flatMap(m=>Object.keys(m)))].sort().filter(d=>d>=from);
     if(!days.length){msg.textContent="시세를 못 받아 추이를 만들 수 없어요.";return;}
+    msg.textContent="지수 불러오는 중...";
+    const idxLine=await loadIndexSeries(days); // 실패해도 추이는 그대로 그린다
     const cash0=lastBal.cashD2||lastBal.cash||0; // 요약과 같은 예수금 총액 기준
     // 해당 날짜 이후에 들어온 입금·배당은 그 시점엔 없던 돈이다. 되감을 때 빼야 과거 현금이 맞는다.
     const cfAfter=d=>{
@@ -1467,7 +1523,7 @@ async function loadEquity(){
     const buyAll=evs.filter(e=>!e.sell).reduce((s,e)=>s+e.amt,0);
     const sellAll=evs.filter(e=>e.sell).reduce((s,e)=>s+e.amt,0);
     const invested=buyAll-sellAll+cash0-cfTotals().div; // 배당은 원금이 아니므로 제외
-    const hold={},lastPx={};
+    const hold={},lastPx={},holdSnap=[];
     let ei=0,restBuy=buyAll,restSell=sellAll; // 해당 날짜 '이후'에 남은 매수·매도액
     const assets=days.map(d=>{
       while(ei<evs.length&&evs[ei].date<=d){
@@ -1484,6 +1540,9 @@ async function loadEquity(){
         if(px[c]&&px[c][d])lastPx[c]=px[c][d];
         stock+=hold[c]*p;
       });
+      const snapH={};
+      Object.keys(hold).forEach(c=>{if(hold[c]>0)snapH[c]=hold[c];});
+      holdSnap.push(snapH);
       return stock+cash0+restBuy-restSell-cfAfter(d);
     });
     // 실제로 확인했던 날은 스냅샷 값이 정확하므로 우선한다
@@ -1495,8 +1554,10 @@ async function loadEquity(){
     // 입출금 기록이 있으면 원금선을 날짜별 계단으로, 없으면 기존처럼 일정하게 그린다
     const investLine=days.map(d=>investedAt(d,invested));
     const rateLine=days.map(d=>depositedAt(d,invested)); // 수익률 분모(누적 입금)
+    $("eqDetail").style.display="none"; // 다시 불러오면 이전 선택은 무효
+    eqCtx=null; // 차트와 컨텍스트가 어긋난 채로 클릭되는 것을 막는다
     drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine,
-      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine);
+      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine,idxLine);
     const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
     const rBase=rateLine[rateLine.length-1]||base; // 수익률 분모는 누적 입금액
     // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
@@ -1526,20 +1587,30 @@ async function loadEquity(){
       +(noPx.length?`<br><span style="color:#f5a623">시세를 못 받은 종목 (체결 단가로 대체 평가)<br>`
         +noPx.map(c=>`<span style="padding-left:14px">${esc(nameOf(c))} —${esc(amtOf(c))}</span>`).join("<br>")+`</span>`:"")
       +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`);
-    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`;
+    eqCtx={days,assets,investLine,rateLine,idx:idxLine,holdSnap,nameOf}; // 차트 클릭 패널이 쓴다
+    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`
+      +(idxLine?"":" · 지수 조회 실패");
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
 }
-function drawEquity(labels,assets,investLine,fullDates,rateLine){
+function drawEquity(labels,assets,investLine,fullDates,rateLine,idx){
   const ctx=$("eqChart").getContext("2d");
   if(eqChart)eqChart.destroy();
   const up=assets[assets.length-1]>=investLine[investLine.length-1];
   const won=n=>Math.round(n||0).toLocaleString("ko-KR")+"원";
+  const ds=[
+    {label:"총자산",data:assets,borderColor:up?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,pointHoverRadius:5,tension:.15},
+    {label:"투입 원금",data:investLine,borderColor:"#8b97ad",borderDash:[6,4],borderWidth:1.5,pointRadius:0,pointHoverRadius:5,stepped:true}
+  ];
+  if(idx)ds.push({label:"KOSPI (등락률)",data:idx.pct,borderColor:"#f5a623",backgroundColor:"transparent",borderWidth:1.2,pointRadius:0,pointHoverRadius:4,tension:.15,yAxisID:"y2"});
   eqChart=new Chart(ctx,{type:"line",
-    data:{labels,datasets:[
-      {label:"총자산",data:assets,borderColor:up?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,pointHoverRadius:5,tension:.15},
-      {label:"투입 원금",data:investLine,borderColor:"#8b97ad",borderDash:[6,4],borderWidth:1.5,pointRadius:0,pointHoverRadius:5,stepped:true}
-    ]},
+    data:{labels,datasets:ds},
     options:{
+      // interaction이 index 모드라 els에 이미 그 날짜 요소가 담긴다. 빈 경우만 직접 조회한다.
+      onClick:(e,els,ch)=>{
+        let i=els&&els.length?els[0].index:null;
+        if(i==null){const p=ch.getElementsAtEventForMode(e,"index",{intersect:false},true);if(p.length)i=p[0].index;}
+        if(i!=null)renderEqDetail(i);
+      },
       // 세로 어디에 있든 그 날짜의 두 값을 함께 보여준다
       interaction:{mode:"index",intersect:false},
       plugins:{
@@ -1555,17 +1626,25 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine){
           },
           callbacks:{
             title:it=>(fullDates&&fullDates[it[0].dataIndex])||it[0].label,
-            label:c=>" "+c.dataset.label+" "+won(c.parsed.y),
+            label:c=>" "+c.dataset.label+" "+(c.dataset.yAxisID==="y2"?(c.parsed.y>=0?"+":"")+c.parsed.y.toFixed(2)+"%":won(c.parsed.y)),
             footer:it=>{
               const i=it[0].dataIndex, p=assets[i]-investLine[i];
               const base=(rateLine&&rateLine[i])||investLine[i];
               const r=base?(p/base*100).toFixed(2):"0.00";
-              return "손익 "+(p>=0?"+":"")+won(p)+" ("+(p>=0?"+":"")+r+"%)";
+              const out=["손익 "+(p>=0?"+":"")+won(p)+" ("+(p>=0?"+":"")+r+"%)"];
+              if(idx){
+                const my=dailyPct(assets,i,flowOn(fullDates[i].replace(/-/g,""))),ix=dailyPct(idx.close,i,0);
+                if(my!==null&&ix!==null)
+                  out.push("당일 "+(my>=0?"+":"")+my.toFixed(2)+"% / KOSPI "+(ix>=0?"+":"")+ix.toFixed(2)+"% · "+verdict(my,ix));
+              }
+              out.push("클릭하면 그날 보유 종목을 봅니다");
+              return out;
             }
           }
         }
       },
       scales:{y:{ticks:{color:"#8b97ad",callback:v=>Math.round(v/10000).toLocaleString("ko-KR")+"만"},grid:{color:"#2a3346"}},
+        y2:{position:"right",display:!!idx,ticks:{color:"#f5a623",callback:v=>v.toFixed(0)+"%"},grid:{display:false}},
         x:{ticks:{color:"#8b97ad",maxTicksLimit:10},grid:{display:false}}}}
   });
 }
