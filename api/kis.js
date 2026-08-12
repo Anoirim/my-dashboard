@@ -120,6 +120,44 @@ async function getDaily(symbol, from, to) {
   return { name, candles };
 }
 
+// 국내 지수 일별 시세 (KOSPI 0001 / KOSDAQ 1001)
+// output2 필드명이 공식 문서로 확정되지 않아 후보 키를 순회한다. rawKeys로 실제 키를 진단할 수 있다.
+const IDX_F = {
+  date: ["stck_bsop_date", "bsop_date", "stck_cntg_hour"],
+  close: ["bstp_nmix_prpr", "stck_clpr", "bstp_nmix_prdy_clpr", "prpr"],
+};
+function pickIdx(o, keys) {
+  for (const k of keys) if (o[k] !== undefined && o[k] !== "") return o[k];
+  return null;
+}
+async function getIndex(code, from, to) {
+  const token = await getToken();
+  if (!/^\d{8}$/.test(from || "") || !/^\d{8}$/.test(to || "")) {
+    const end = new Date();
+    const start = new Date(); start.setMonth(start.getMonth() - 5);
+    from = ymd(start); to = ymd(end);
+  }
+  const map = {};
+  let rawKeys = null;
+  const periods = splitPeriods(from, to);
+  for (let i = 0; i < periods.length; i++) {
+    if (i > 0) await sleep(120);
+    const url =
+      BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice" +
+      "?FID_COND_MRKT_DIV_CODE=U&FID_INPUT_ISCD=" + code +
+      "&FID_INPUT_DATE_1=" + periods[i][0] + "&FID_INPUT_DATE_2=" + periods[i][1] +
+      "&FID_PERIOD_DIV_CODE=D";
+    const j = await (await fetch(url, { headers: headers(token, "FHKUP03500100") })).json();
+    const rows = j.output2 || [];
+    if (!rawKeys && rows.length) rawKeys = Object.keys(rows[0]);
+    rows.forEach((x) => {
+      const d = pickIdx(x, IDX_F.date), c = num(pickIdx(x, IDX_F.close));
+      if (d && c) map[String(d)] = { date: String(d), close: c };
+    });
+  }
+  return { code, candles: Object.keys(map).sort().map((k) => map[k]), rawKeys };
+}
+
 async function getFinance(symbol) {
   const token = await getToken();
   const url =
@@ -337,6 +375,13 @@ module.exports = async function handler(req, res) {
 
     // 잔고조회는 종목코드 불필요
     if (action === "balance") { res.status(200).json(await getBalance()); return; }
+
+    // 지수 조회도 종목코드 불필요 (지수코드 사용)
+    if (action === "index") {
+      const code = /^\d{4}$/.test(String(req.query.code || "")) ? String(req.query.code) : "0001";
+      res.status(200).json(await getIndex(code, String(req.query.from || ""), String(req.query.to || "")));
+      return;
+    }
 
     // 체결내역도 종목코드 불필요 (기간만 사용)
     if (action === "trades") {
