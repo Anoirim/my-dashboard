@@ -158,6 +158,32 @@ async function getIndex(code, from, to) {
   return { code, candles: Object.keys(map).sort().map((k) => map[k]), rawKeys };
 }
 
+// 구글 뉴스 RSS는 비공식 엔드포인트다. 서버에서 막힐 수 있어 status/sample로 원인을 진단한다.
+function unesc(s) {
+  return String(s || "")
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'").replace(/&apos;/g, "'").replace(/&amp;/g, "&")
+    .replace(/<[^>]+>/g, "").trim();
+}
+async function getNews(q, from, to, limit) {
+  const dash = (v) => v.slice(0, 4) + "-" + v.slice(4, 6) + "-" + v.slice(6, 8);
+  let query = q;
+  if (/^\d{8}$/.test(from || "")) query += " after:" + dash(from);
+  if (/^\d{8}$/.test(to || "")) query += " before:" + dash(to);
+  const url = "https://news.google.com/rss/search?q=" + encodeURIComponent(query) + "&hl=ko&gl=KR&ceid=KR:ko";
+  const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; my-dashboard/1.0)" } });
+  const xml = await r.text();
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, limit).map((m) => {
+    const g = (t) => {
+      const x = new RegExp("<" + t + "[^>]*>(.*?)</" + t + ">", "s").exec(m[1]);
+      return x ? unesc(x[1]) : "";
+    };
+    return { title: g("title"), link: g("link"), pubDate: g("pubDate"), source: g("source") };
+  });
+  return { q: query, status: r.status, count: items.length, items, sample: items.length ? null : xml.slice(0, 300) };
+}
+
 async function getFinance(symbol) {
   const token = await getToken();
   const url =
@@ -375,6 +401,15 @@ module.exports = async function handler(req, res) {
 
     // 잔고조회는 종목코드 불필요
     if (action === "balance") { res.status(200).json(await getBalance()); return; }
+
+    // 뉴스는 외부 소스라 KIS 토큰도 종목코드도 필요 없다
+    if (action === "news") {
+      const q = String(req.query.q || "").trim();
+      if (!q) return res.status(400).json({ error: "q(검색어)를 입력하세요." });
+      const lim = Math.min(parseInt(req.query.limit, 10) || 10, 30);
+      res.status(200).json(await getNews(q, String(req.query.from || ""), String(req.query.to || ""), lim));
+      return;
+    }
 
     // 지수 조회도 종목코드 불필요 (지수코드 사용)
     if (action === "index") {
