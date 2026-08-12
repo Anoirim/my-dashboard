@@ -78,6 +78,9 @@
   .exp-tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:var(--border);color:var(--muted)}
   .exp-tag.card{background:rgba(255,143,171,.15);color:#ff8fab}
   .exp-amt{font-weight:700;font-size:14px}
+  .news-a{color:var(--accent);text-decoration:none}
+  .news-a:hover{text-decoration:underline}
+  .news-meta{color:var(--muted);font-size:12px}
   .exp-label{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:600}
   .exp-divider{height:1px;background:var(--border);margin:18px 0}
   .exp-edit{color:var(--accent)!important;border:none;background:transparent;cursor:pointer;padding:4px 6px;font-size:13px}
@@ -1510,12 +1513,14 @@ async function loadEqNews(i){
   renderNewsList(box,groups);
 }
 function renderNewsList(box,groups){
+  const md=s=>{const t=new Date(s);return isNaN(t)?"":(t.getMonth()+1)+"/"+t.getDate();};
   box.innerHTML=groups.map(g=>
     `<div style="margin-top:10px"><b>${esc(g.q)}</b>`
     +(g.items.length?g.items.map(n=>
         `<div style="padding-left:14px;margin-top:4px">`
-        +`<a href="${escAttr(n.link)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(n.title)}</a>`
-        +`<span style="color:var(--muted);font-size:12px"> · ${esc(n.source)}</span></div>`).join("")
+        +`<span class="news-meta">${md(n.pubDate)}</span> `
+        +`<a href="${escAttr(n.link)}" target="_blank" rel="noopener" class="news-a">${esc(n.title)}</a>`
+        +`<span class="news-meta"> · ${esc(n.source)}</span></div>`).join("")
       :`<div style="padding-left:14px;color:var(--muted)">뉴스를 찾지 못했어요.</div>`)
     +`</div>`).join("");
 }

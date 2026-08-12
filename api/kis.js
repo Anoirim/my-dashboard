@@ -179,7 +179,11 @@ async function getNews(q, from, to, limit) {
       const x = new RegExp("<" + t + "[^>]*>(.*?)</" + t + ">", "s").exec(m[1]);
       return x ? unesc(x[1]) : "";
     };
-    return { title: g("title"), link: g("link"), pubDate: g("pubDate"), source: g("source") };
+    // 구글 뉴스 제목은 "제목 - 매체" 형식이라 매체를 따로 보여주면 중복된다
+    const source = g("source");
+    let title = g("title");
+    if (source && title.endsWith(" - " + source)) title = title.slice(0, -(source.length + 3)).trim();
+    return { title, link: g("link"), pubDate: g("pubDate"), source };
   });
   return { q: query, status: r.status, count: items.length, items, sample: items.length ? null : xml.slice(0, 300) };
 }
