@@ -218,33 +218,6 @@
       <div class="hint" id="stockMsg"></div>
     </div>
 
-    <!-- 내 보유 종목 (두 계좌 통합) -->
-    <div class="card full">
-      <h2><span class="dot" style="background:#33d69f"></span>내 보유 종목 (두 계좌 통합)</h2>
-      <div class="row" style="margin-bottom:12px;align-items:center">
-        <input type="number" id="hFee" value="0.015" step="0.001" style="width:150px" placeholder="수수료 편도(%)">
-        <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)">
-        <button onclick="loadHoldings(event)">불러오기</button>
-        <span class="hint" id="hMsg" style="margin:0"></span>
-      </div>
-      <div id="holdingsWrap" style="overflow-x:auto"></div>
-    </div>
-
-    <!-- 목표 현금 만들기 -->
-    <div class="card full">
-      <h2><span class="dot" style="background:#c77dff"></span>목표 현금 만들기</h2>
-      <div class="row" style="margin-bottom:12px;align-items:center">
-        <input type="number" id="coTarget" placeholder="필요 금액(원)" style="width:160px">
-        <select id="coOrder" style="width:150px">
-          <option value="profit">이익 큰 순</option>
-          <option value="loss">손실 큰 순</option>
-          <option value="amount">평가금액 큰 순</option>
-        </select>
-        <button onclick="calcCashOut()">계산</button>
-        <span class="hint" id="coMsg" style="margin:0">보유 종목을 먼저 불러오세요.</span>
-      </div>
-      <div id="coWrap" style="overflow-x:auto"></div>
-    </div>
 
     <!-- 거래내역 (체결 기록) -->
     <div class="card full">
@@ -273,6 +246,34 @@
         <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">체결 내역 표</summary>
         <div id="tradesWrap" style="overflow-x:auto;margin-top:10px"></div>
       </details>
+    </div>
+
+    <!-- 내 보유 종목 (두 계좌 통합) -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#33d69f"></span>내 보유 종목 (두 계좌 통합)</h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="number" id="hFee" value="0.015" step="0.001" style="width:150px" placeholder="수수료 편도(%)">
+        <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)">
+        <button onclick="loadHoldings(event)">불러오기</button>
+        <span class="hint" id="hMsg" style="margin:0"></span>
+      </div>
+      <div id="holdingsWrap" style="overflow-x:auto"></div>
+    </div>
+
+    <!-- 목표 현금 만들기 -->
+    <div class="card full">
+      <h2><span class="dot" style="background:#c77dff"></span>목표 현금 만들기</h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="number" id="coTarget" placeholder="필요 금액(원)" style="width:160px">
+        <select id="coOrder" style="width:150px">
+          <option value="profit">이익 큰 순</option>
+          <option value="loss">손실 큰 순</option>
+          <option value="amount">평가금액 큰 순</option>
+        </select>
+        <button onclick="calcCashOut()">계산</button>
+        <span class="hint" id="coMsg" style="margin:0">보유 종목을 먼저 불러오세요.</span>
+      </div>
+      <div id="coWrap" style="overflow-x:auto"></div>
     </div>
 
     <!-- 입출금 · 배당 기록 -->
@@ -1044,8 +1045,7 @@ async function loadHoldings(ev){
     const hs=r.holdings||[];
     // 보유종목 조회와 잔고 조회가 같은 응답이라, 예수금까지 여기서 확보해 둔다
     lastHoldings=hs; lastBal=r;
-    if(!hs.length)$("holdingsWrap").innerHTML='<div class="hint">보유 종목이 없거나 계좌가 설정되지 않았어요.</div>';
-    else renderHoldings(hs);
+    showHoldings(hs);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCT1_NO 등)와 배포를 확인하세요.";}
   finally{holdingsBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
@@ -1091,6 +1091,10 @@ function renderHoldings(hs){
 
 /* ===== 목표 현금 만들기 ===== */
 let lastHoldings=[];
+function showHoldings(hs){
+  if(!hs||!hs.length)$("holdingsWrap").innerHTML='<div class="hint">보유 종목이 없거나 계좌가 설정되지 않았어요.</div>';
+  else renderHoldings(hs);
+}
 // 매도 실수령 = 수량 × 현재가 × (1 − 수수료 − 거래세). ETF는 거래세 면제
 const coNet=(h,fee)=>h.price*(1-fee-(isEtfName(h.name)?0:0.002));
 const coPnl=(h,qty,fee)=>(h.price-h.avg)*qty-h.price*qty*(fee+(isEtfName(h.name)?0:0.002));
@@ -1199,6 +1203,11 @@ async function loadTrades(ev){
     lastTrades=r.trades||[];
     lastBal=(b&&!b.error)?b:null;
     lastHoldings=(lastBal&&lastBal.holdings)||lastHoldings; // 목표 현금 계산에서 바로 쓰도록
+    // 잔고를 이미 받아왔으니 보유종목 버튼을 또 누르게 하지 않는다
+    if(lastBal){
+      showHoldings(lastHoldings);
+      $("hMsg").textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+" · 거래내역과 함께 조회";
+    }
     renderTrades(lastTrades);
     const errs=[].concat(r.errors||[],(b&&b.errors)||[],(b&&b.error)?["잔고: "+b.error]:[]);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(errs.length?(" · 계좌 오류: "+errs.join(" / ")):"");
