@@ -1464,9 +1464,10 @@ function renderEqDetail(i){
     +`<div>누적 손익 <b style="color:${col(p)}">${(p>=0?"+":"")+wonKR(p)} (${pct(base?p/base*100:0)})</b>`
     +` · 총자산 ${wonKR(assets[i])}</div>`
     +(my===null?`<div style="margin-top:6px;color:var(--muted)">첫날이라 전일 대비 변동을 계산할 수 없어요.</div>`
-      :`<div style="margin-top:6px">당일 내 자산 <b style="color:${col(my)}">${pct(my)}</b>`
+      :`<div style="margin-top:6px"><span style="color:var(--muted)">전일 대비</span> 내 자산 <b style="color:${col(my)}">${pct(my)}</b>`
         +(ix===null?` <span style="color:var(--muted)">· 지수 없음</span>`
-          :` / KOSPI <b style="color:${col(ix)}">${pct(ix)}</b> · <b>${verdict(my,ix)}</b>`)+`</div>`)
+          :` / KOSPI <b style="color:${col(ix)}">${pct(ix)}</b> · <b>${verdict(my,ix)}</b>`)+`</div>`
+        +`<div style="color:var(--muted);font-size:12px;margin-top:2px">입출금·배당은 빼고 주가 변동만 계산</div>`)
     +(rows.length?`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목 ${rows.length}개</div>`
       +rows.map(x=>`<div style="padding-left:14px">${esc(nameOf(x.c))} · ${x.q.toLocaleString("ko-KR")}주</div>`).join("")
       :`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목이 없어요.</div>`)
@@ -1694,7 +1695,7 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq){
               if(idx){
                 const my=dailyPct(assets,i,flowOn(fullDates[i].replace(/-/g,""))),ix=dailyPct(idx.close,i,0);
                 if(my!==null&&ix!==null)
-                  out.push("당일 "+(my>=0?"+":"")+my.toFixed(2)+"% / KOSPI "+(ix>=0?"+":"")+ix.toFixed(2)+"% · "+verdict(my,ix));
+                  out.push("전일 대비 "+(my>=0?"+":"")+my.toFixed(2)+"% / KOSPI "+(ix>=0?"+":"")+ix.toFixed(2)+"% · "+verdict(my,ix));
               }
               out.push("클릭하면 그날 보유 종목을 봅니다");
               return out;
