@@ -258,6 +258,7 @@
         <span class="hint" id="hMsg" style="margin:0"></span>
       </div>
       <div id="holdingsWrap" style="overflow-x:auto"></div>
+      <div class="hint" id="hNote" style="margin-top:10px"></div>
     </div>
 
     <!-- 목표 현금 만들기 -->
@@ -1054,11 +1055,17 @@ function renderHoldings(hs){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const fee=(parseFloat($("hFee").value)||0)/100, tgt=(parseFloat($("hTarget").value)||0)/100;
   let totCost=0,totEval=0,totPnl=0,totTarget=0;
+  const evalAmtOf=h=>h.evalAmt||h.price*h.qty;
+  const sumEval=hs.reduce((s,h)=>s+evalAmtOf(h),0);
+  const sumPnl=hs.reduce((s,h)=>s+(h.pnl||0),0);
+  const ratio=(v,base)=>base?v/base*100:0;
   const body=hs.map(h=>{
     const etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
     const bep=h.avg*(1+fee)/denom, target=h.avg*(1+fee)*(1+tgt)/denom;
-    const cost=h.avg*h.qty; totCost+=cost; totEval+=(h.evalAmt||h.price*h.qty); totPnl+=(h.pnl||0); totTarget+=target*h.qty;
+    const cost=h.avg*h.qty; totCost+=cost; totEval+=evalAmtOf(h); totPnl+=(h.pnl||0); totTarget+=target*h.qty;
     const up=(h.pnl||0)>=0;
+    // 총손익이 0에 가까우면 기여도가 폭주해 숫자가 무의미해진다
+    const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
     return `<tr>
       <td class="l"><span class="acct">${h.account}</span></td>
       <td class="l">${h.name}<span style="color:var(--muted);font-size:11px"> ${h.code}</span></td>
@@ -1066,7 +1073,10 @@ function renderHoldings(hs){
       <td>${won(h.avg)}</td>
       <td>${won(h.price)}</td>
       <td>${won(h.evalAmt)}</td>
-      <td class="${up?"up":"down"}">${up?"+":""}${won(h.pnl)} <span style="font-size:11px">(${h.pnlRate}%)</span></td>
+      <td>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
+      <td class="${up?"up":"down"}">${up?"+":""}${won(h.pnl)}</td>
+      <td class="${up?"up":"down"}">${up?"+":""}${h.pnlRate}%</td>
+      <td class="${up?"up":"down"}">${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
       <td>${won(bep)}</td>
       <td style="color:var(--accent2)">${won(target)}</td>
     </tr>`;
@@ -1075,18 +1085,25 @@ function renderHoldings(hs){
   $("holdingsWrap").innerHTML=`<table class="htbl">
     <thead><tr>
       <th class="l">계좌</th><th class="l">종목</th><th>수량</th><th>매입가</th><th>현재가</th>
-      <th>평가금액</th><th>평가손익</th><th>본전가</th><th>목표가(+${$("hTarget").value}%)</th>
+      <th>평가금액</th><th>비중</th><th>평가손익</th><th>손익률</th><th>기여도</th>
+      <th>본전가</th><th>목표가(+${$("hTarget").value}%)</th>
     </tr></thead>
     <tbody>${body}</tbody>
     <tfoot><tr>
-      <td class="l" colspan="4">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)} · 수익률 ${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span></td>
+      <td class="l" colspan="4">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)}</span></td>
       <td></td>
       <td>${won(totEval)}</td>
+      <td>100%</td>
       <td class="${tup?"up":"down"}">${tup?"+":""}${won(totPnl)}</td>
+      <td class="${tup?"up":"down"}">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</td>
+      <td>100%</td>
       <td></td>
       <td style="color:var(--accent2)">${won(totTarget)}</td>
     </tr></tfoot>
   </table>`;
+  $("hNote").innerHTML=`<b>비중</b> 평가금액 기준 포트폴리오 점유율 · `
+    +`<b>기여도</b> 총손익 ${tup?"+":""}${won(totPnl)}원 중 이 종목이 차지하는 비율`
+    +`<br>기여도가 음수면 전체가 손실인데 이 종목은 이익이라는 뜻입니다.`;
 }
 
 /* ===== 목표 현금 만들기 ===== */
