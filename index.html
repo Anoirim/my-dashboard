@@ -1535,6 +1535,7 @@ function renderEqDetail(i){
           :` / KOSPI <b style="color:${col(ix)}">${pct(ix)}</b> · <b>${verdict(my,ix)}</b>`)+`</div>`
         +`<div style="color:var(--muted);font-size:12px;margin-top:2px">입출금·배당은 빼고 주가 변동만 계산</div>`)
     +macroLine(i,fx,ir)
+    +macroEasy(i,fx,ir)
     +(rows.length?`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목 ${rows.length}개</div>`
       +rows.map(x=>`<div style="padding-left:14px">${esc(nameOf(x.c))} · ${x.q.toLocaleString("ko-KR")}주</div>`).join("")
       :`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목이 없어요.</div>`)
@@ -1549,6 +1550,27 @@ function macroLine(i,fx,ir){
   if(fx)out.push(`환율 ${Math.round(fx.close[i]).toLocaleString("ko-KR")}원 (${sign(dailyPct(fx.close,i,0),2,"%")})`);
   if(ir)out.push(`국고채3년 ${ir.close[i].toFixed(2)}% (${sign(i<1?null:ir.close[i]-ir.close[i-1],2,"%p")})`);
   return out.length?`<div style="margin-top:4px;color:var(--muted)">${out.join(" · ")}</div>`:"";
+}
+// 숫자만 보면 뜻을 모르니 방향별로 문장을 붙인다. 단정하지 않는 표현을 쓴다.
+function macroEasy(i,fx,ir){
+  if(i<1)return "";
+  const lines=[];
+  if(fx){
+    const w=Math.round(fx.close[i]).toLocaleString("ko-KR"), d=dailyPct(fx.close,i,0)||0;
+    if(d<-0.1)lines.push(`환율이 내려 <b>원화가 세졌어요</b> (${w}원). 외국인 돈이 들어오는 신호일 수 있어요. 다만 수출기업이 손에 쥐는 원화는 줄어듭니다.`);
+    else if(d>0.1)lines.push(`환율이 올라 <b>원화가 약해졌어요</b> (${w}원). 수출기업엔 유리하지만, 외국인 자금이 빠져나가는 신호일 수도 있어요.`);
+    else lines.push(`환율은 거의 그대로예요 (${w}원).`);
+  }
+  if(ir){
+    const v=ir.close[i].toFixed(2), d=ir.close[i]-ir.close[i-1];
+    if(d>0.01)lines.push(`금리가 <b>올랐어요</b> (${v}%). 안전한 예금이 매력적이 되면서 주식에서 돈이 빠질 수 있어요. 아직 적자인 성장주가 특히 크게 영향받습니다.`);
+    else if(d<-0.01)lines.push(`금리가 <b>내렸어요</b> (${v}%). 주식으로 돈이 들어오기 좋은 환경이에요. 성장주가 더 크게 반응합니다.`);
+    else lines.push(`금리는 거의 그대로예요 (${v}%).`);
+  }
+  if(!lines.length)return "";
+  return `<div style="margin-top:8px;padding:8px 10px;background:var(--card);border-radius:8px;font-size:12px;line-height:1.7">`
+    +`<span style="color:var(--accent);font-weight:700">🔰 쉬운 해석</span><br>${lines.join("<br>")}`
+    +`<br><span style="color:var(--muted);font-size:11px">참고용이에요. 주가가 이 둘만으로 움직이지는 않습니다.</span></div>`;
 }
 // 그날 평가금액이 큰 종목이 자산 변동을 좌우한다
 function topHoldings(i,n){
