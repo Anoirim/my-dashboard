@@ -188,6 +188,48 @@ async function getNews(q, from, to, limit) {
   return { q: query, status: r.status, count: items.length, items, sample: items.length ? null : xml.slice(0, 300) };
 }
 
+// 금리·환율은 KIS에 없어 한국은행 ECOS를 쓴다. 통계표/항목 코드는 kind=list, kind=items로 직접 확인한다.
+const ECOS = "https://ecos.bok.or.kr/api";
+async function ecosFetch(path) {
+  const key = process.env.ECOS_KEY;
+  if (!key) return { error: "환경변수 ECOS_KEY가 설정되지 않았습니다." };
+  const j = await (await fetch(ECOS + "/" + path.replace("{key}", encodeURIComponent(key)))).json();
+  if (j.RESULT) return { error: j.RESULT.CODE + " " + j.RESULT.MESSAGE };
+  return j;
+}
+function ecosRows(j, key) {
+  return (j[key] && j[key].row) || [];
+}
+async function getMacro(kind, stat, item, from, to, q) {
+  if (kind === "list") {
+    const j = await ecosFetch("StatisticTableList/{key}/json/kr/1/1000/");
+    if (j.error) return j;
+    let rows = ecosRows(j, "StatisticTableList").map((x) => ({ stat: x.STAT_CODE, name: x.STAT_NAME, cycle: x.CYCLE }));
+    if (q) rows = rows.filter((x) => String(x.name || "").includes(q));
+    return { count: rows.length, rows };
+  }
+  if (kind === "items") {
+    if (!stat) return { error: "stat(통계표코드)을 입력하세요." };
+    const j = await ecosFetch("StatisticItemList/{key}/json/kr/1/1000/" + stat);
+    if (j.error) return j;
+    let rows = ecosRows(j, "StatisticItemList").map((x) => ({ item: x.ITEM_CODE, name: x.ITEM_NAME, cycle: x.CYCLE, unit: x.UNIT_NAME }));
+    if (q) rows = rows.filter((x) => String(x.name || "").includes(q));
+    return { stat, count: rows.length, rows };
+  }
+  if (!stat || !item) return { error: "stat(통계표코드)과 item(항목코드)을 입력하세요." };
+  const j = await ecosFetch(`StatisticSearch/{key}/json/kr/1/1000/${stat}/D/${from}/${to}/${item}`);
+  if (j.error) return j;
+  const rows = ecosRows(j, "StatisticSearch");
+  return {
+    stat, item,
+    name: rows.length ? rows[0].ITEM_NAME1 : null,
+    unit: rows.length ? rows[0].UNIT_NAME : null,
+    series: rows
+      .map((x) => ({ date: String(x.TIME || ""), value: Number(String(x.DATA_VALUE || "").replace(/,/g, "")) }))
+      .filter((x) => /^\d{8}$/.test(x.date) && isFinite(x.value)),
+  };
+}
+
 async function getFinance(symbol) {
   const token = await getToken();
   const url =
@@ -405,6 +447,21 @@ module.exports = async function handler(req, res) {
 
     // 잔고조회는 종목코드 불필요
     if (action === "balance") { res.status(200).json(await getBalance()); return; }
+
+    // 금리·환율은 한국은행 ECOS라 KIS 토큰도 종목코드도 필요 없다
+    if (action === "macro") {
+      const end = new Date();
+      const start = new Date(); start.setMonth(start.getMonth() - 5);
+      const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def);
+      res.status(200).json(await getMacro(
+        String(req.query.kind || "series"),
+        String(req.query.stat || "").trim(),
+        String(req.query.item || "").trim(),
+        dt(String(req.query.from || ""), ymd(start)),
+        dt(String(req.query.to || ""), ymd(end)),
+        String(req.query.q || "").trim()));
+      return;
+    }
 
     // 뉴스는 외부 소스라 KIS 토큰도 종목코드도 필요 없다
     if (action === "news") {
