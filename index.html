@@ -1445,18 +1445,58 @@ function depositedAt(ymd8,fallback){
 
 /* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
 let eqChart=null,eqCtx=null;
-// 지수는 종목 일봉과 휴장일이 어긋날 수 있어 없는 날은 직전 값을 이어 쓴다
+// 외부 시계열은 종목 일봉과 휴장일이 어긋날 수 있어 없는 날은 직전 값을 이어 쓴다
+function alignSeries(days,m){
+  if(!Object.keys(m).length)return null;
+  let carry=0;
+  const close=days.map(d=>{if(m[d]!=null)carry=m[d];return carry;});
+  const first=close.find(v=>v>0)||0;
+  return first?{close,pct:close.map(v=>v?(v/first-1)*100:0)}:null;
+}
 async function loadIndexSeries(days,code){
   try{
     const r=await fetch(KIS_PROXY+"?action=index&code="+(code||"0001")+"&from="+days[0]+"&to="+days[days.length-1]).then(x=>x.json());
     const m={};(r.candles||[]).forEach(c=>{m[c.date]=c.close;});
-    if(!Object.keys(m).length)return null;
-    let carry=0;
-    const close=days.map(d=>{if(m[d])carry=m[d];return carry;});
-    const first=close.find(v=>v>0)||0;
-    if(!first)return null;
-    return {close,pct:close.map(v=>v?(v/first-1)*100:0)};
+    return alignSeries(days,m);
   }catch(e){return null;}
+}
+// 금리·환율은 한국은행 ECOS. 코드는 배포본 진단 조회로 확정한 값이다.
+const MACRO={fx:{stat:"731Y001",item:"0000001"},rate:{stat:"817Y002",item:"010200000"}};
+async function loadMacroSeries(days,kind){
+  const c=MACRO[kind];
+  try{
+    const r=await fetch(KIS_PROXY+"?action=macro&stat="+c.stat+"&item="+c.item
+      +"&from="+days[0]+"&to="+days[days.length-1]).then(x=>x.json());
+    const m={};(r.series||[]).forEach(x=>{m[x.date]=x.value;});
+    const s=alignSeries(days,m);
+    if(s){s.unit=r.unit||"";s.name=r.name||"";}
+    return s;
+  }catch(e){return null;}
+}
+// 추세가 아니라 '같이 움직였는지'를 봐야 하므로 일간 변동끼리 비교한다
+function corr(a,b){
+  const xs=[],ys=[];
+  for(let i=0;i<a.length;i++)if(a[i]!=null&&b[i]!=null){xs.push(a[i]);ys.push(b[i]);}
+  const n=xs.length;
+  if(n<10)return null;
+  const mx=xs.reduce((s,v)=>s+v,0)/n, my=ys.reduce((s,v)=>s+v,0)/n;
+  let sxy=0,sxx=0,syy=0;
+  for(let i=0;i<n;i++){const dx=xs[i]-mx,dy=ys[i]-my;sxy+=dx*dy;sxx+=dx*dx;syy+=dy*dy;}
+  return (sxx&&syy)?sxy/Math.sqrt(sxx*syy):null;
+}
+// 금리는 비율이 아니라 수준(연%)이라 변화량(%p)으로 봐야 한다
+function diffSeries(arr){return arr.map((v,i)=>i<1?null:v-arr[i-1]);}
+function corrNote(assets,days,idx,fx,ir){
+  const my=assets.map((v,i)=>dailyPct(assets,i,flowOn(days[i])));
+  const pctOf=s=>s?s.close.map((v,i)=>dailyPct(s.close,i,0)):null;
+  const items=[["KOSPI",idx&&corr(my,pctOf(idx))],["환율",fx&&corr(my,pctOf(fx))],
+    ["국고채3년",ir&&corr(my,diffSeries(ir.close))]]
+    .filter(x=>x[1]!=null&&x[1]!==false)
+    .map(x=>`${x[0]} <b>${x[1]>=0?"+":""}${x[1].toFixed(2)}</b>`);
+  if(!items.length)return "";
+  // 상관은 인과가 아니고 표본도 짧아, 숫자만 던지면 과신하기 쉽다
+  return `<br><span style="color:var(--muted)">동조도(일간 변동 기준) · ${items.join(" · ")}`
+    +` <span style="font-size:11px">+1 같이 움직임 / −1 반대 / 0 무관 · 인과가 아니라 참고용</span></span>`;
 }
 // 입출금·배당은 주가 변동이 아니므로 일간 변동률에서 뺀다
 function flowOn(d){
@@ -1479,7 +1519,7 @@ function verdict(my,ix){
 function renderEqDetail(i){
   const box=$("eqDetail");
   if(!eqCtx||i==null||!eqCtx.days[i]){box.style.display="none";return;}
-  const {days,assets,investLine,rateLine,idx,holdSnap,nameOf}=eqCtx;
+  const {days,assets,investLine,rateLine,idx,fx,ir,holdSnap,nameOf}=eqCtx;
   const d=days[i],kd=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);
   const my=dailyPct(assets,i,flowOn(d)),ix=idx?dailyPct(idx.close,i,0):null;
   const p=assets[i]-investLine[i],base=(rateLine&&rateLine[i])||investLine[i];
@@ -1494,6 +1534,7 @@ function renderEqDetail(i){
         +(ix===null?` <span style="color:var(--muted)">· 지수 없음</span>`
           :` / KOSPI <b style="color:${col(ix)}">${pct(ix)}</b> · <b>${verdict(my,ix)}</b>`)+`</div>`
         +`<div style="color:var(--muted);font-size:12px;margin-top:2px">입출금·배당은 빼고 주가 변동만 계산</div>`)
+    +macroLine(i,fx,ir)
     +(rows.length?`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목 ${rows.length}개</div>`
       +rows.map(x=>`<div style="padding-left:14px">${esc(nameOf(x.c))} · ${x.q.toLocaleString("ko-KR")}주</div>`).join("")
       :`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목이 없어요.</div>`)
@@ -1502,6 +1543,13 @@ function renderEqDetail(i){
   box.style.display="block";
 }
 const escAttr=s=>String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+function macroLine(i,fx,ir){
+  const sign=(v,n,suf)=>v==null?"-":(v>=0?"+":"")+v.toFixed(n)+suf;
+  const out=[];
+  if(fx)out.push(`환율 ${Math.round(fx.close[i]).toLocaleString("ko-KR")}원 (${sign(dailyPct(fx.close,i,0),2,"%")})`);
+  if(ir)out.push(`국고채3년 ${ir.close[i].toFixed(2)}% (${sign(i<1?null:ir.close[i]-ir.close[i-1],2,"%p")})`);
+  return out.length?`<div style="margin-top:4px;color:var(--muted)">${out.join(" · ")}</div>`:"";
+}
 // 그날 평가금액이 큰 종목이 자산 변동을 좌우한다
 function topHoldings(i,n){
   const {days,holdSnap,px}=eqCtx,d=days[i],h=holdSnap[i]||{};
@@ -1596,6 +1644,9 @@ async function loadEquity(){
     const idxLine=await loadIndexSeries(days,"0001"); // 실패해도 추이는 그대로 그린다
     await new Promise(s=>setTimeout(s,150)); // 초당 호출 제한
     const kqLine=await loadIndexSeries(days,"1001");
+    msg.textContent="금리·환율 불러오는 중...";
+    const fxLine=await loadMacroSeries(days,"fx");
+    const irLine=await loadMacroSeries(days,"rate");
     const cash0=lastBal.cashD2||lastBal.cash||0; // 요약과 같은 예수금 총액 기준
     // 해당 날짜 이후에 들어온 입금·배당은 그 시점엔 없던 돈이다. 되감을 때 빼야 과거 현금이 맞는다.
     const cfAfter=d=>{
@@ -1641,7 +1692,7 @@ async function loadEquity(){
     $("eqDetail").style.display="none"; // 다시 불러오면 이전 선택은 무효
     eqCtx=null; // 차트와 컨텍스트가 어긋난 채로 클릭되는 것을 막는다
     drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine,
-      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine,idxLine,kqLine);
+      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine,idxLine,kqLine,fxLine);
     const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
     const rBase=rateLine[rateLine.length-1]||base; // 수익률 분모는 누적 입금액
     // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
@@ -1670,13 +1721,14 @@ async function loadEquity(){
         ? `<br><span style="color:#f5a623">입력한 순입금이 계좌에서 역산한 원금과 ${wonKR(Math.abs(mismatch))} 차이 납니다 — 빠뜨린 입출금이 있는지 보세요.</span>`:"")
       +(noPx.length?`<br><span style="color:#f5a623">시세를 못 받은 종목 (체결 단가로 대체 평가)<br>`
         +noPx.map(c=>`<span style="padding-left:14px">${esc(nameOf(c))} —${esc(amtOf(c))}</span>`).join("<br>")+`</span>`:"")
-      +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`);
-    eqCtx={days,assets,investLine,rateLine,idx:idxLine,holdSnap,px,nameOf}; // 차트 클릭 패널이 쓴다
+      +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`)
+      +corrNote(assets,days,idxLine,fxLine,irLine);
+    eqCtx={days,assets,investLine,rateLine,idx:idxLine,fx:fxLine,ir:irLine,holdSnap,px,nameOf}; // 차트 클릭 패널이 쓴다
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`
       +(idxLine?"":" · 지수 조회 실패");
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
 }
-function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq){
+function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx){
   const ctx=$("eqChart").getContext("2d");
   if(eqChart)eqChart.destroy();
   const up=assets[assets.length-1]>=investLine[investLine.length-1];
@@ -1688,6 +1740,7 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq){
   if(idx)ds.push({label:"KOSPI (등락률)",data:idx.pct,borderColor:"#f5a623",backgroundColor:"transparent",borderWidth:1.2,pointRadius:0,pointHoverRadius:4,tension:.15,yAxisID:"y2"});
   // 라인이 넷이면 과밀해서 기본은 숨긴다. 범례를 눌러 켜면 보인다.
   if(kq)ds.push({label:"KOSDAQ (등락률)",data:kq.pct,borderColor:"#c77dff",backgroundColor:"transparent",borderWidth:1.2,pointRadius:0,pointHoverRadius:4,tension:.15,yAxisID:"y2",hidden:true});
+  if(fx)ds.push({label:"원/달러 (등락률)",data:fx.pct,borderColor:"#4dd0e1",backgroundColor:"transparent",borderWidth:1.2,pointRadius:0,pointHoverRadius:4,tension:.15,yAxisID:"y2",hidden:true});
   eqChart=new Chart(ctx,{type:"line",
     data:{labels,datasets:ds},
     options:{
@@ -1730,7 +1783,7 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq){
         }
       },
       scales:{y:{ticks:{color:"#8b97ad",callback:v=>Math.round(v/10000).toLocaleString("ko-KR")+"만"},grid:{color:"#2a3346"}},
-        y2:{position:"right",display:!!(idx||kq),ticks:{color:"#f5a623",callback:v=>v.toFixed(0)+"%"},grid:{display:false}},
+        y2:{position:"right",display:!!(idx||kq||fx),ticks:{color:"#f5a623",callback:v=>v.toFixed(0)+"%"},grid:{display:false}},
         x:{ticks:{color:"#8b97ad",maxTicksLimit:10},grid:{display:false}}}}
   });
 }
