@@ -1486,6 +1486,28 @@ function corr(a,b){
 }
 // 금리는 비율이 아니라 수준(연%)이라 변화량(%p)으로 봐야 한다
 function diffSeries(arr){return arr.map((v,i)=>i<1?null:v-arr[i-1]);}
+// 입금이 들어온 날 자산이 뛰면 낙폭이 왜곡되므로, 일간 수익률만 누적한 곡선에서 잰다
+function drawdownStats(assets,days){
+  const curve=[100];
+  for(let i=1;i<assets.length;i++)curve.push(curve[i-1]*(1+(dailyPct(assets,i,flowOn(days[i]))||0)/100));
+  let peak=curve[0],mdd=0,mddAt=null;
+  curve.forEach((v,i)=>{
+    if(v>peak)peak=v;
+    const dd=(v/peak-1)*100;
+    if(dd<mdd){mdd=dd;mddAt=days[i];}
+  });
+  const top=curve.reduce((a,b)=>b>a?b:a,curve[0]);
+  return {mdd,mddAt,cur:(curve[curve.length-1]/top-1)*100};
+}
+function mddNote(assets,days){
+  if(assets.length<2)return "";
+  const {mdd,mddAt,cur}=drawdownStats(assets,days);
+  if(mdd>=-0.01)return "";
+  const md=d=>d?d.slice(4,6)+"/"+d.slice(6,8):"";
+  return `<br><span style="color:var(--muted)">최대낙폭 <b style="color:var(--danger)">${mdd.toFixed(2)}%</b> (${md(mddAt)})`
+    +` · 현재 고점 대비 <b style="color:${cur<-0.01?"var(--danger)":"var(--accent2)"}">${cur.toFixed(2)}%</b>`
+    +` <span style="font-size:11px">입출금을 뺀 수익 곡선 기준</span></span>`;
+}
 function corrNote(assets,days,idx,fx,ir){
   const my=assets.map((v,i)=>dailyPct(assets,i,flowOn(days[i])));
   const pctOf=s=>s?s.close.map((v,i)=>dailyPct(s.close,i,0)):null;
@@ -1519,13 +1541,16 @@ function verdict(my,ix){
 function renderEqDetail(i){
   const box=$("eqDetail");
   if(!eqCtx||i==null||!eqCtx.days[i]){box.style.display="none";return;}
-  const {days,assets,investLine,rateLine,idx,fx,ir,holdSnap,nameOf}=eqCtx;
+  const {days,assets,investLine,rateLine,idx,fx,ir,holdSnap,px,nameOf}=eqCtx;
   const d=days[i],kd=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);
   const my=dailyPct(assets,i,flowOn(d)),ix=idx?dailyPct(idx.close,i,0):null;
   const p=assets[i]-investLine[i],base=(rateLine&&rateLine[i])||investLine[i];
   const col=v=>v>=0?"var(--accent2)":"var(--danger)";
   const pct=v=>(v>=0?"+":"")+v.toFixed(2)+"%";
-  const rows=Object.keys(holdSnap[i]||{}).map(c=>({c,q:holdSnap[i][c]})).filter(x=>x.q>0);
+  // 평가금액이 큰 종목이 자산을 좌우하므로 그 순서로 보여준다
+  const rows=Object.keys(holdSnap[i]||{})
+    .map(c=>({c,q:holdSnap[i][c],amt:holdSnap[i][c]*((px[c]&&px[c][d])||0)}))
+    .filter(x=>x.q>0).sort((a,b)=>b.amt-a.amt);
   box.innerHTML=`<div class="easy-title">${kd}</div>`
     +`<div>누적 손익 <b style="color:${col(p)}">${(p>=0?"+":"")+wonKR(p)} (${pct(base?p/base*100:0)})</b>`
     +` · 총자산 ${wonKR(assets[i])}</div>`
@@ -1537,7 +1562,14 @@ function renderEqDetail(i){
     +macroLine(i,fx,ir)
     +macroEasy(i,fx,ir)
     +(rows.length?`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목 ${rows.length}개</div>`
-      +rows.map(x=>`<div style="padding-left:14px">${esc(nameOf(x.c))} · ${x.q.toLocaleString("ko-KR")}주</div>`).join("")
+      +rows.map(x=>{
+        const r=stockPct(x.c,i);
+        // 같은 날 시장과 나란히 놓아야 이 종목만의 문제인지 알 수 있다
+        const tail=r==null?` <span style="color:var(--muted);font-size:11px">(시세 없음)</span>`
+          :` · <b style="color:${col(r)}">${pct(r)}</b>`
+            +(ix===null?"":` <span style="color:var(--muted);font-size:11px">시장 ${pct(ix)} · ${gapText(r-ix)}</span>`);
+        return `<div style="padding-left:14px">${esc(nameOf(x.c))} · ${x.q.toLocaleString("ko-KR")}주${tail}</div>`;
+      }).join("")
       :`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목이 없어요.</div>`)
     +`<div style="margin-top:10px"><button onclick="loadEqNews(${i})">이날 뉴스 보기</button></div>`
     +`<div id="eqNews"></div>`;
@@ -1571,6 +1603,18 @@ function macroEasy(i,fx,ir){
   return `<div style="margin-top:8px;padding:8px 10px;background:var(--card);border-radius:8px;font-size:12px;line-height:1.7">`
     +`<span style="color:var(--accent);font-weight:700">🔰 쉬운 해석</span><br>${lines.join("<br>")}`
     +`<br><span style="color:var(--muted);font-size:11px">참고용이에요. 주가가 이 둘만으로 움직이지는 않습니다.</span></div>`;
+}
+// 종목별 전일 대비 등락률. 일봉을 못 받은 종목은 계산할 수 없다.
+function stockPct(code,i){
+  const {days,px}=eqCtx;
+  if(i<1||!px||!px[code])return null;
+  const a=px[code][days[i-1]],b=px[code][days[i]];
+  return (a&&b)?(b/a-1)*100:null;
+}
+// 시장과 얼마나 벌어졌는지가 종목 판단의 근거다. 1%p 이내는 시장을 따라간 것으로 본다.
+function gapText(g){
+  if(Math.abs(g)<=1)return "시장만큼";
+  return `시장보다 ${g>0?"+":""}${g.toFixed(1)}%p`;
 }
 // 그날 평가금액이 큰 종목이 자산 변동을 좌우한다
 function topHoldings(i,n){
@@ -1744,6 +1788,7 @@ async function loadEquity(){
       +(noPx.length?`<br><span style="color:#f5a623">시세를 못 받은 종목 (체결 단가로 대체 평가)<br>`
         +noPx.map(c=>`<span style="padding-left:14px">${esc(nameOf(c))} —${esc(amtOf(c))}</span>`).join("<br>")+`</span>`:"")
       +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`)
+      +mddNote(assets,days)
       +corrNote(assets,days,idxLine,fxLine,irLine);
     eqCtx={days,assets,investLine,rateLine,idx:idxLine,fx:fxLine,ir:irLine,holdSnap,px,nameOf}; // 차트 클릭 패널이 쓴다
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`
