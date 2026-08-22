@@ -837,9 +837,9 @@ function toggleAuto(){
 /* --- 국내 (KIS 프록시) --- */
 let lastFinanceKR=null, lastSymKR="";
 async function loadStockKR(silent){
-  const sym=$("ticker").value.trim();
+  const sym=$("ticker").value.trim().toUpperCase();
   const msg=$("stockMsg");
-  if(!/^\d{6}$/.test(sym)){msg.textContent="6자리 국내 종목코드를 입력하세요 (예: 005930).";return;}
+  if(!/^[0-9A-Z]{6}$/.test(sym)){msg.textContent="6자리 국내 종목코드를 입력하세요 (예: 005930).";return;}
   if(sym!==lastSymKR){lastFinanceKR=null;lastSymKR=sym;} // 종목 바뀌면 재무 초기화
   if(!silent)msg.textContent="불러오는 중...";
   try{

@@ -490,8 +490,9 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const symbol = String(req.query.symbol || "").trim();
-    if (!/^\d{6}$/.test(symbol))
+    // ETF·신주인수권 등은 단축코드 끝자리에 영문이 들어간다(예: 0117V0). 숫자 6자리로만 막으면 이들이 조회에서 빠진다.
+    const symbol = String(req.query.symbol || "").trim().toUpperCase();
+    if (!/^[0-9A-Z]{6}$/.test(symbol))
       return res.status(400).json({ error: "6자리 종목코드를 입력하세요 (예: 005930)" });
 
     let out;
