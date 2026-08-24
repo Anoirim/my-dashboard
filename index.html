@@ -1473,7 +1473,7 @@ async function loadIndexSeries(days,code){
   }catch(e){return null;}
 }
 // 금리·환율은 한국은행 ECOS. 코드는 배포본 진단 조회로 확정한 값이다.
-const MACRO={fx:{stat:"731Y001",item:"0000001"},rate:{stat:"817Y002",item:"010200000"}};
+const MACRO={fx:{stat:"731Y001",item:"0000001"},jpy:{stat:"731Y001",item:"0000002"},rate:{stat:"817Y002",item:"010200000"}};
 async function loadMacroSeries(days,kind){
   const c=MACRO[kind];
   try{
@@ -1520,11 +1520,11 @@ function mddNote(assets,days){
     +` · 현재 고점 대비 <b style="color:${cur<-0.01?"var(--danger)":"var(--accent2)"}">${cur.toFixed(2)}%</b>`
     +` <span style="font-size:11px">입출금을 뺀 수익 곡선 기준</span></span>`;
 }
-function corrNote(assets,days,idx,fx,ir){
+function corrNote(assets,days,idx,fx,ir,jpy){
   const my=assets.map((v,i)=>dailyPct(assets,i,flowOn(days[i])));
   const pctOf=s=>s?s.close.map((v,i)=>dailyPct(s.close,i,0)):null;
-  const items=[["KOSPI",idx&&corr(my,pctOf(idx))],["환율",fx&&corr(my,pctOf(fx))],
-    ["국고채3년",ir&&corr(my,diffSeries(ir.close))]]
+  const items=[["KOSPI",idx&&corr(my,pctOf(idx))],["원/달러",fx&&corr(my,pctOf(fx))],
+    ["원/엔",jpy&&corr(my,pctOf(jpy))],["국고채3년",ir&&corr(my,diffSeries(ir.close))]]
     .filter(x=>x[1]!=null&&x[1]!==false)
     .map(x=>`${x[0]} <b>${x[1]>=0?"+":""}${x[1].toFixed(2)}</b>`);
   if(!items.length)return "";
@@ -1553,7 +1553,7 @@ function verdict(my,ix){
 function renderEqDetail(i){
   const box=$("eqDetail");
   if(!eqCtx||i==null||!eqCtx.days[i]){box.style.display="none";return;}
-  const {days,assets,investLine,rateLine,idx,fx,ir,holdSnap,px,nameOf}=eqCtx;
+  const {days,assets,investLine,rateLine,idx,fx,ir,jpy,holdSnap,px,nameOf}=eqCtx;
   const d=days[i],kd=d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);
   const my=dailyPct(assets,i,flowOn(d)),ix=idx?dailyPct(idx.close,i,0):null;
   const p=assets[i]-investLine[i],base=(rateLine&&rateLine[i])||investLine[i];
@@ -1571,8 +1571,8 @@ function renderEqDetail(i){
         +(ix===null?` <span style="color:var(--muted)">· 지수 없음</span>`
           :` / KOSPI <b style="color:${col(ix)}">${pct(ix)}</b> · <b>${verdict(my,ix)}</b>`)+`</div>`
         +`<div style="color:var(--muted);font-size:12px;margin-top:2px">입출금·배당은 빼고 주가 변동만 계산</div>`)
-    +macroLine(i,fx,ir)
-    +macroEasy(i,fx,ir)
+    +macroLine(i,fx,ir,jpy)
+    +macroEasy(i,fx,ir,jpy)
     +(rows.length?`<div style="margin-top:8px;color:var(--muted)">그날 보유 종목 ${rows.length}개</div>`
       +rows.map(x=>{
         const r=stockPct(x.c,i);
@@ -1588,22 +1588,30 @@ function renderEqDetail(i){
   box.style.display="block";
 }
 const escAttr=s=>String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
-function macroLine(i,fx,ir){
+function macroLine(i,fx,ir,jpy){
   const sign=(v,n,suf)=>v==null?"-":(v>=0?"+":"")+v.toFixed(n)+suf;
   const out=[];
-  if(fx)out.push(`환율 ${Math.round(fx.close[i]).toLocaleString("ko-KR")}원 (${sign(dailyPct(fx.close,i,0),2,"%")})`);
+  if(fx)out.push(`원/달러 ${Math.round(fx.close[i]).toLocaleString("ko-KR")}원 (${sign(dailyPct(fx.close,i,0),2,"%")})`);
+  if(jpy)out.push(`원/엔 100엔=${Math.round(jpy.close[i]).toLocaleString("ko-KR")}원 (${sign(dailyPct(jpy.close,i,0),2,"%")})`);
   if(ir)out.push(`국고채3년 ${ir.close[i].toFixed(2)}% (${sign(i<1?null:ir.close[i]-ir.close[i-1],2,"%p")})`);
   return out.length?`<div style="margin-top:4px;color:var(--muted)">${out.join(" · ")}</div>`:"";
 }
 // 숫자만 보면 뜻을 모르니 방향별로 문장을 붙인다. 단정하지 않는 표현을 쓴다.
-function macroEasy(i,fx,ir){
+function macroEasy(i,fx,ir,jpy){
   if(i<1)return "";
   const lines=[];
   if(fx){
     const w=Math.round(fx.close[i]).toLocaleString("ko-KR"), d=dailyPct(fx.close,i,0)||0;
-    if(d<-0.1)lines.push(`환율이 내려 <b>원화가 세졌어요</b> (${w}원). 외국인 돈이 들어오는 신호일 수 있어요. 다만 수출기업이 손에 쥐는 원화는 줄어듭니다.`);
-    else if(d>0.1)lines.push(`환율이 올라 <b>원화가 약해졌어요</b> (${w}원). 수출기업엔 유리하지만, 외국인 자금이 빠져나가는 신호일 수도 있어요.`);
-    else lines.push(`환율은 거의 그대로예요 (${w}원).`);
+    if(d<-0.1)lines.push(`원/달러가 내려 <b>원화가 세졌어요</b> (${w}원). 외국인 돈이 들어오는 신호일 수 있어요. 다만 수출기업이 손에 쥐는 원화는 줄어듭니다.`);
+    else if(d>0.1)lines.push(`원/달러가 올라 <b>원화가 약해졌어요</b> (${w}원). 수출기업엔 유리하지만, 외국인 자금이 빠져나가는 신호일 수도 있어요.`);
+    else lines.push(`원/달러는 거의 그대로예요 (${w}원).`);
+  }
+  if(jpy){
+    const w=Math.round(jpy.close[i]).toLocaleString("ko-KR"), d=dailyPct(jpy.close,i,0)||0;
+    // 엔은 대형주와 인과가 약하다. 엔저는 일본 수출기업과의 경쟁에서 우리 기업이 불리해지는 정도로만 짚는다.
+    if(d<-0.1)lines.push(`원/엔이 내려 <b>엔화가 약해졌어요</b> (100엔=${w}원). 자동차·철강처럼 일본과 겹치는 업종은 수출 경쟁에서 다소 불리해질 수 있어요.`);
+    else if(d>0.1)lines.push(`원/엔이 올라 <b>엔화가 세졌어요</b> (100엔=${w}원). 일본과 겹치는 수출업종엔 상대적으로 유리한 쪽이에요.`);
+    else lines.push(`원/엔은 거의 그대로예요 (100엔=${w}원).`);
   }
   if(ir){
     const v=ir.close[i].toFixed(2), d=ir.close[i]-ir.close[i-1];
@@ -1724,6 +1732,7 @@ async function loadEquity(){
     const kqLine=await loadIndexSeries(days,"1001");
     msg.textContent="금리·환율 불러오는 중...";
     const fxLine=await loadMacroSeries(days,"fx");
+    const jpyLine=await loadMacroSeries(days,"jpy");
     const irLine=await loadMacroSeries(days,"rate");
     const cash0=lastBal.cashD2||lastBal.cash||0; // 요약과 같은 예수금 총액 기준
     // 해당 날짜 이후에 들어온 입금·배당은 그 시점엔 없던 돈이다. 되감을 때 빼야 과거 현금이 맞는다.
@@ -1770,7 +1779,7 @@ async function loadEquity(){
     $("eqDetail").style.display="none"; // 다시 불러오면 이전 선택은 무효
     eqCtx=null; // 차트와 컨텍스트가 어긋난 채로 클릭되는 것을 막는다
     drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine,
-      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine,idxLine,kqLine,fxLine);
+      days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine,idxLine,kqLine,fxLine,jpyLine);
     const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
     const rBase=rateLine[rateLine.length-1]||base; // 수익률 분모는 누적 입금액
     // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
@@ -1801,13 +1810,13 @@ async function loadEquity(){
         +noPx.map(c=>`<span style="padding-left:14px">${esc(nameOf(c))} —${esc(amtOf(c))}</span>`).join("<br>")+`</span>`:"")
       +(cashFlows.length?"":`<br>입출금 기록이 없어 원금을 일정하게 그렸어요. 위 카드에 입금·출금을 넣으면 계단식으로 정확해집니다.`)
       +mddNote(assets,days)
-      +corrNote(assets,days,idxLine,fxLine,irLine);
-    eqCtx={days,assets,investLine,rateLine,idx:idxLine,fx:fxLine,ir:irLine,holdSnap,px,nameOf}; // 차트 클릭 패널이 쓴다
+      +corrNote(assets,days,idxLine,fxLine,irLine,jpyLine);
+    eqCtx={days,assets,investLine,rateLine,idx:idxLine,fx:fxLine,ir:irLine,jpy:jpyLine,holdSnap,px,nameOf}; // 차트 클릭 패널이 쓴다
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+` · ${days.length}일 · 종목 ${codes.length}개`
       +(idxLine?"":" · 지수 조회 실패");
   }catch(e){msg.textContent="추이 생성 실패: "+e.message;}
 }
-function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx){
+function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx,jpy){
   const ctx=$("eqChart").getContext("2d");
   if(eqChart)eqChart.destroy();
   const up=assets[assets.length-1]>=investLine[investLine.length-1];
@@ -1820,6 +1829,7 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx){
   // 라인이 넷이면 과밀해서 기본은 숨긴다. 범례를 눌러 켜면 보인다.
   if(kq)ds.push({label:"KOSDAQ (등락률)",data:kq.pct,borderColor:"#c77dff",backgroundColor:"transparent",borderWidth:1.2,pointRadius:0,pointHoverRadius:4,tension:.15,yAxisID:"y2",hidden:true});
   if(fx)ds.push({label:"원/달러 (등락률)",data:fx.pct,borderColor:"#4dd0e1",backgroundColor:"transparent",borderWidth:1.2,pointRadius:0,pointHoverRadius:4,tension:.15,yAxisID:"y2",hidden:true});
+  if(jpy)ds.push({label:"원/엔 (등락률)",data:jpy.pct,borderColor:"#ff9800",backgroundColor:"transparent",borderWidth:1.2,pointRadius:0,pointHoverRadius:4,tension:.15,yAxisID:"y2",hidden:true});
   eqChart=new Chart(ctx,{type:"line",
     data:{labels,datasets:ds},
     options:{
@@ -1862,7 +1872,7 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx){
         }
       },
       scales:{y:{ticks:{color:"#8b97ad",callback:v=>Math.round(v/10000).toLocaleString("ko-KR")+"만"},grid:{color:"#2a3346"}},
-        y2:{position:"right",display:!!(idx||kq||fx),ticks:{color:"#f5a623",callback:v=>v.toFixed(0)+"%"},grid:{display:false}},
+        y2:{position:"right",display:!!(idx||kq||fx||jpy),ticks:{color:"#f5a623",callback:v=>v.toFixed(0)+"%"},grid:{display:false}},
         x:{ticks:{color:"#8b97ad",maxTicksLimit:10},grid:{display:false}}}}
   });
 }
