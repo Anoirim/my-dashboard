@@ -489,7 +489,7 @@ async function initFileSync(){
 }
 
 /* ===== 타이머 ===== */
-let total = 2*60, remain = total, tick = null, running = false;
+let total = 2*60, remain = total, tick = null, running = false, endTime = 0, fired = false;
 function fmt(s){
   const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
   const p=n=>String(n).padStart(2,"0");
@@ -507,13 +507,31 @@ function setTimerCustom(){
 function toggleTimer(){running?pauseTimer():startTimer();}
 function startTimer(){
   if(remain<=0)return;
-  running=true;$("startBtn").textContent="일시정지";
+  fired=false;running=true;$("startBtn").textContent="일시정지";
+  // 1씩 깎으면 백그라운드 탭에서 tick이 throttle돼 시간이 통째로 멈춘다. 목표 시각을 잡고 매번 재계산한다.
+  endTime=Date.now()+remain*1000;
+  if(window.Notification&&Notification.permission==="default")Notification.requestPermission();
   tick=setInterval(()=>{
-    remain--;render();
-    if(remain<=0){clearInterval(tick);running=false;$("startBtn").textContent="시작";
-      playAlarm();setTimeout(()=>alert("타이머 종료!"),100);}
-  },1000);
+    remain=Math.round((endTime-Date.now())/1000);
+    if(remain<=0){remain=0;render();fireAlarm();return;}
+    render();
+  },250);
 }
+// 백그라운드에서 소리는 억제되므로 OS 알림으로도 알린다. 소리·알림·중복방지를 한곳에서 처리.
+function fireAlarm(){
+  if(fired)return;fired=true;
+  clearInterval(tick);running=false;remain=0;render();$("startBtn").textContent="시작";
+  playAlarm();
+  try{if(window.Notification&&Notification.permission==="granted")
+    new Notification("타이머 종료!",{body:"설정한 시간이 끝났어요."});}catch(e){}
+  setTimeout(()=>alert("타이머 종료!"),100);
+}
+// 탭으로 돌아온 순간 정확한 남은 시간으로 복구하고, 이미 지났으면 그 자리에서 알린다
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden||!running)return;
+  remain=Math.round((endTime-Date.now())/1000);
+  if(remain<=0){remain=0;render();fireAlarm();}else render();
+});
 function playAlarm(){
   try{
     const ac=new (window.AudioContext||window.webkitAudioContext)();
@@ -530,7 +548,10 @@ function playAlarm(){
     }
   }catch(e){}
 }
-function pauseTimer(){clearInterval(tick);running=false;$("startBtn").textContent="시작";}
+function pauseTimer(){
+  if(running&&endTime)remain=Math.max(0,Math.round((endTime-Date.now())/1000)); // 재개 시 이어지도록 남은 시간 확정
+  clearInterval(tick);running=false;$("startBtn").textContent="시작";
+}
 function resetTimer(){pauseTimer();remain=total;render();}
 render();
 
