@@ -207,15 +207,16 @@
           </select>
         </div>
         <div class="row">
-          <input type="number" id="swAvg" placeholder="평단 (원)" style="flex:1">
-          <input type="number" id="swQty" placeholder="수량" step="0.0001" style="flex:1">
+          <input type="number" id="swAvg" placeholder="평단 (원)" style="flex:1" title="지금 이 종목을 산 평균 단가. 종목을 고르면 자동으로 채워집니다.">
+          <input type="number" id="swQty" placeholder="수량" step="0.0001" style="flex:1" title="지금 보유한 주식 수. 종목을 고르면 자동으로 채워집니다.">
         </div>
         <div class="row">
-          <input type="number" id="swSell" placeholder="매도가 (원)" style="flex:1">
-          <input type="number" id="swBuy" placeholder="재매수가 (원)" style="flex:1">
+          <input type="number" id="swSell" placeholder="매도가 (원)" style="flex:1" title="지금 팔 가격. 기본값은 현재가지만, 직접 바꿔 '이 값에 팔면?'을 시뮬레이션할 수 있습니다.">
+          <button class="ghost" onclick="fillSwPrice()" title="선택 종목의 실시간 현재가를 매도가에 채웁니다">현재가</button>
+          <input type="number" id="swBuy" placeholder="재매수가 (원)" style="flex:1" title="떨어졌을 때 다시 살 가격. 이 값이 낮을수록 되사는 수량이 늘어납니다.">
         </div>
         <div class="row">
-          <input type="number" id="swRecover" placeholder="회복 예상가(원) - 선택" style="flex:1">
+          <input type="number" id="swRecover" placeholder="회복 예상가(원) - 선택" style="flex:1" title="나중에 주가가 이 값까지 회복한다고 가정할 때, 손절 후 재매수가 그냥 버티기보다 얼마나 이득인지 계산합니다. 비워도 됩니다.">
           <button onclick="calcSwitch()">계산</button>
         </div>
       </div>
@@ -882,7 +883,23 @@ function fillSwFromStock(){
   const i=$("swStock").value;if(i===""||!lastHoldings[i])return;
   const h=lastHoldings[i];
   $("swAvg").value=h.avg;$("swQty").value=h.qty;
-  if(h.price)$("swSell").value=h.price; // 매도가 기본값은 현재가
+  if(h.price)$("swSell").value=h.price; // 매도가 기본값은 불러온 시점 현재가 (버튼으로 실시간 갱신 가능)
+}
+// 매도가를 선택 종목의 실시간 현재가로 갱신한다. 계산과 분리해 임의 매도가 시뮬레이션도 가능하게 둔다.
+let swPriceBusy=false;
+async function fillSwPrice(ev){
+  const i=$("swStock").value;
+  const out=$("swOut");
+  if(i===""||!lastHoldings[i]){out.style.display="block";out.innerHTML='<div class="easy-n">먼저 보유 종목을 선택하세요.</div>';return;}
+  if(swPriceBusy)return;swPriceBusy=true;
+  const btn=ev&&ev.target?ev.target:null;if(btn){btn.disabled=true;btn.textContent="조회중";}
+  try{
+    const code=lastHoldings[i].code;
+    const r=await fetch(KIS_PROXY+"?action=quote&symbol="+code).then(x=>x.json());
+    if(r&&r.price){$("swSell").value=r.price;}
+    else{out.style.display="block";out.innerHTML='<div class="easy-n">현재가를 받지 못했어요.</div>';}
+  }catch(e){out.style.display="block";out.innerHTML='<div class="easy-n">현재가 조회 실패: '+e.message+'</div>';}
+  finally{swPriceBusy=false;if(btn){btn.disabled=false;btn.textContent="현재가";}}
 }
 function calcSwitch(){
   const out=$("swOut");
