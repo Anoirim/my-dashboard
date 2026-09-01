@@ -627,7 +627,7 @@ function saveExpData(){expData[curMonth]={cards,fixed};localStorage.setItem("exp
 function loadMonth(m){
   if(!m)return;
   curMonth=m; localStorage.setItem("curMonth",m);
-  if(expData[m]){cards=expData[m].cards; fixed=expData[m].fixed;}
+  if(expData[m]){cards=expData[m].cards; fixed=expData[m].fixed; autoSaveFile();} // curMonth 변경을 미러 (신규 월은 아래 saveExpData가 커버)
   else{
     // 직전(가장 최근 이전) 달에서 정기지출·카드 이월 (청구액은 0으로 초기화)
     const prev=Object.keys(expData).filter(k=>k<m).sort().pop();
@@ -1950,6 +1950,7 @@ function switchDept(d){
   document.querySelectorAll(".dept-tab").forEach(t=>{t.classList.toggle("on",t.dataset.tab===d);});
   // 숨은 동안 캔버스가 크기 0으로 그려졌을 수 있어, 탭을 열 때 다시 맞춘다
   document.querySelectorAll("canvas").forEach(cv=>{const ch=window.Chart&&Chart.getChart(cv);if(ch){try{ch.resize();}catch(e){}}});
+  autoSaveFile(); // 선택 탭도 localStorage에 있으니 파일 미러에 반영 (초기화 시엔 fileHandle 없어 무해)
 }
 switchDept(localStorage.getItem("curDept")||"fin");
 

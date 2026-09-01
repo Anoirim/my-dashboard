@@ -11,8 +11,6 @@ const BASE = IS_MOCK
   ? "https://openapivts.koreainvestment.com:29443" // 모의투자
   : "https://openapi.koreainvestment.com:9443";    // 실전
 
-let tokenCache = { token: null, exp: 0 };
-
 // --- Vercel KV / Upstash 토큰 저장소 (있으면 사용) ---
 const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
