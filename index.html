@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ㅌㅌㅌㅌㅌㄴㅇㄹㅇㄴㄹㅇㄴㄹ>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -270,6 +270,10 @@
         <span class="hint" id="hMsg" style="margin:0"></span>
       </div>
       <div id="holdingsWrap" style="overflow-x:auto"></div>
+      <div id="hChartBox" style="display:none;margin-top:14px">
+        <canvas id="hChart" height="90"></canvas>
+        <div class="hint" id="hChartNote" style="margin-top:8px"></div>
+      </div>
       <div class="hint" id="hNote" style="margin-top:10px"></div>
     </div>
 
@@ -1099,7 +1103,7 @@ function renderHoldings(hs){
     const up=(h.pnl||0)>=0;
     // 총손익이 0에 가까우면 기여도가 폭주해 숫자가 무의미해진다
     const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
-    return `<tr>
+    return `<tr onclick="showHoldChart('${h.code}')" style="cursor:pointer">
       <td class="l"><span class="acct">${h.account}</span></td>
       <td class="l">${h.name}<span style="color:var(--muted);font-size:11px"> ${h.code}</span></td>
       <td>${h.qty.toLocaleString()}</td>
@@ -1142,8 +1146,47 @@ function renderHoldings(hs){
 /* ===== 목표 현금 만들기 ===== */
 let lastHoldings=[];
 function showHoldings(hs){
+  // 새로 불러오면 이전 종목 차트는 무효다. 캐시도 비워 최신 시세를 다시 받는다.
+  holdChartCache={};$("hChartBox").style.display="none";if(hChart){hChart.destroy();hChart=null;}
   if(!hs||!hs.length)$("holdingsWrap").innerHTML='<div class="hint">보유 종목이 없거나 계좌가 설정되지 않았어요.</div>';
   else renderHoldings(hs);
+}
+// 보유종목 행을 누르면 그 종목의 최근 일봉을 아래에 그린다. 코드만 받아 이름은 목록에서 찾는다.
+let holdChartCache={},hChart=null;
+async function showHoldChart(code){
+  const box=$("hChartBox"),note=$("hChartNote");
+  const h=(lastHoldings||[]).find(x=>x.code===code);
+  const name=h?h.name:code;
+  box.style.display="block";
+  note.textContent=name+" 시세 불러오는 중...";
+  try{
+    let candles=holdChartCache[code];
+    if(!candles){
+      const r=await fetch(KIS_PROXY+"?action=daily&symbol="+code).then(x=>x.json());
+      candles=r.candles||[];holdChartCache[code]=candles;
+    }
+    if(!candles.length){note.textContent=esc(name)+" 시세를 받지 못했어요.";if(hChart){hChart.destroy();hChart=null;}return;}
+    drawHoldChart(candles,name);
+    const first=candles[0].close,last=candles[candles.length-1].close;
+    const chg=first?(last/first-1)*100:0;
+    const lo=Math.min(...candles.map(c=>c.close)),hi=Math.max(...candles.map(c=>c.close));
+    const won=n=>Math.round(n).toLocaleString("ko-KR");
+    note.innerHTML=`<b>${esc(name)}</b> · 최근 ${candles.length}일 `
+      +`<b style="color:${chg>=0?"var(--accent2)":"var(--danger)"}">${chg>=0?"+":""}${chg.toFixed(2)}%</b>`
+      +` · 최저 ${won(lo)} · 최고 ${won(hi)} · 현재 ${won(last)}`;
+  }catch(e){note.textContent="시세 조회 실패: "+e.message;}
+}
+function drawHoldChart(candles,name){
+  const ctx=$("hChart").getContext("2d");
+  if(hChart)hChart.destroy();
+  const labels=candles.map(c=>c.date.slice(4,6)+"/"+c.date.slice(6,8));
+  const data=candles.map(c=>c.close);
+  const rising=data[data.length-1]>=data[0];
+  hChart=new Chart(ctx,{type:"line",
+    data:{labels,datasets:[{data,borderColor:rising?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,pointHoverRadius:4,tension:.15}]},
+    options:{plugins:{legend:{display:false},title:{display:true,text:name+" 최근 시세(종가)",color:"#8b97ad"}},
+      scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},x:{ticks:{color:"#8b97ad",maxTicksLimit:8},grid:{display:false}}}}
+  });
 }
 // 매도 실수령 = 수량 × 현재가 × (1 − 수수료 − 거래세). ETF는 거래세 면제
 const coNet=(h,fee)=>h.price*(1-fee-(isEtfName(h.name)?0:0.002));
