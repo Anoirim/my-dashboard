@@ -1292,16 +1292,17 @@ async function showHoldChart(code){
 function drawHoldChart(candles,name,avg,bep){
   const ctx=$("hChart").getContext("2d");
   if(hChart)hChart.destroy();
+  const won=n=>Math.round(n).toLocaleString("ko-KR");
   const labels=candles.map(c=>c.date.slice(4,6)+"/"+c.date.slice(6,8));
   const data=candles.map(c=>c.close);
   const rising=data[data.length-1]>=data[0];
-  // 평단(주황)·본전가(빨강) 수평선. 상수 데이터셋이라 별도 플러그인 없이 그린다. 종가선이 본전가 위로 와야 실익.
-  const datasets=[{data,borderColor:rising?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,pointHoverRadius:4,tension:.15}];
-  if(avg>0)datasets.push({label:"평단",data:data.map(()=>avg),borderColor:"#f5a623",borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,tension:0});
-  if(bep>0)datasets.push({label:"본전가",data:data.map(()=>bep),borderColor:"#e5484d",borderWidth:1.5,borderDash:[3,3],pointRadius:0,pointHoverRadius:0,tension:0});
+  // 평단(주황)·본전가(빨강) 수평선. 값이 수수료·세금 차이만큼 붙어 겹쳐 보이므로 범례 이름에 수치를 병기한다.
+  const datasets=[{label:"종가",data,borderColor:rising?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,pointHoverRadius:4,tension:.15}];
+  if(avg>0)datasets.push({label:"평단 "+won(avg),data:data.map(()=>avg),borderColor:"#f5a623",borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,tension:0});
+  if(bep>0)datasets.push({label:"본전가 "+won(bep),data:data.map(()=>bep),borderColor:"#e5484d",borderWidth:1.5,borderDash:[3,3],pointRadius:0,pointHoverRadius:0,tension:0});
   hChart=new Chart(ctx,{type:"line",
     data:{labels,datasets},
-    options:{plugins:{legend:{display:false},title:{display:true,text:name+" 최근 시세(종가)",color:"#8b97ad"}},
+    options:{plugins:{legend:{display:true,position:"top",labels:{color:"#8b97ad",boxWidth:14,font:{size:11}}},title:{display:true,text:name+" 최근 시세(종가)",color:"#8b97ad"}},
       scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},x:{ticks:{color:"#8b97ad",maxTicksLimit:8},grid:{display:false}}}}
   });
 }
