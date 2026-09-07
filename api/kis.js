@@ -436,6 +436,81 @@ async function getTrades(from, to) {
   return { trades, from, to, periods, errors: errors.length ? errors : null };
 }
 
+// --- 기간별 실현손익 일별 조회 (TTTC8708R, 계좌별 각자의 API 키) ---
+// output1 필드 중 trad_dt(매매일자)·rlzt_pfls(실현손익)만 공식 확정. 나머지는 후보키로 매핑하고 rawKeys로 진단한다.
+const RLZ_F = {
+  date: ["trad_dt", "bass_dt", "stck_bsop_date"],
+  realized: ["rlzt_pfls", "pfls_amt", "evlu_pfls_amt"],
+  fee: ["fee", "tl_fee", "brkg_fee", "tot_fee"],
+  tax: ["tl_tax", "tax", "tot_tax"],
+  sell: ["sll_amt", "sll_amt_smtl", "sll_excc_amt"],
+};
+function pickF(o, keys) {
+  for (const k of keys) if (o[k] !== undefined && o[k] !== "") return o[k];
+  return null;
+}
+async function realizedOnce(a, trId, from, to, fk, nk) {
+  const token = await getTokenFor(a.key, a.secret);
+  const q = new URLSearchParams({
+    CANO: a.no.slice(0, 8), ACNT_PRDT_CD: a.no.slice(8, 10),
+    INQR_STRT_DT: from, INQR_END_DT: to,
+    SORT_DVSN: "00", INQR_DVSN: "00", CBLC_DVSN: "00", PDNO: "",
+    CTX_AREA_FK100: fk, CTX_AREA_NK100: nk,
+  }).toString();
+  const url = BASE + "/uapi/domestic-stock/v1/trading/inquire-period-profit?" + q;
+  const h = headers(token, trId, a.key, a.secret);
+  if (fk || nk) h.tr_cont = "N";
+  const r = await fetch(url, { headers: h });
+  return { json: await r.json(), trCont: r.headers.get("tr_cont") || "" };
+}
+async function realizedPaged(a, from, to, byDate, diag, errors) {
+  const trId = IS_MOCK ? "VTTC8708R" : "TTTC8708R";
+  let fk = "", nk = "";
+  for (let page = 0; page < 20; page++) {
+    if (page > 0) await sleep(200);
+    let { json: j, trCont } = await realizedOnce(a, trId, from, to, fk, nk);
+    if (j.rt_cd !== "0" && isRate(j.msg1)) {
+      await sleep(1000);
+      ({ json: j, trCont } = await realizedOnce(a, trId, from, to, fk, nk));
+    }
+    if (j.rt_cd !== "0") { errors.push(a.label + " " + from + ": " + (j.msg1 || "조회 실패")); return; }
+    const rows = j.output1 || [];
+    if (!diag.rawKeys && rows.length) { diag.rawKeys = Object.keys(rows[0]); diag.raw1 = rows[0]; }
+    rows.forEach((o) => {
+      const d = pickF(o, RLZ_F.date); if (!d) return;
+      const key = String(d);
+      const rec = byDate[key] || (byDate[key] = { date: key, realized: 0, fee: 0, tax: 0, sell: 0 });
+      rec.realized += num(pickF(o, RLZ_F.realized)) || 0;
+      rec.fee += num(pickF(o, RLZ_F.fee)) || 0;
+      rec.tax += num(pickF(o, RLZ_F.tax)) || 0;
+      rec.sell += num(pickF(o, RLZ_F.sell)) || 0;
+    });
+    if (trCont !== "M" && trCont !== "F") return;
+    fk = j.ctx_area_fk100 || (j.output2 && j.output2.ctx_area_fk100) || "";
+    nk = j.ctx_area_nk100 || (j.output2 && j.output2.ctx_area_nk100) || "";
+    if (!fk && !nk) return;
+  }
+}
+async function getRealized(from, to) {
+  const accts = acctConfigs();
+  if (!accts.length) return { error: "계좌가 설정되지 않았습니다 (KIS_ACCT1_NO 등)" };
+  const periods = splitPeriods(from, to);
+  const byDate = {};
+  const diag = { rawKeys: null, raw1: null };
+  const errors = [];
+  for (let i = 0; i < accts.length; i++) {
+    const a = accts[i];
+    if (i > 0) await sleep(600); // 계좌 간 간격(초당 제한 회피)
+    for (let p = 0; p < periods.length; p++) {
+      if (p > 0) await sleep(250);
+      try { await realizedPaged(a, periods[p][0], periods[p][1], byDate, diag, errors); }
+      catch (e) { errors.push(a.label + ": " + e.message); }
+    }
+  }
+  const days = Object.keys(byDate).sort().map((k) => byDate[k]).filter((d) => d.realized !== 0 || d.sell !== 0);
+  return { days, rawKeys: diag.rawKeys, raw1: diag.raw1, from, to, periods, errors: errors.length ? errors : null };
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   try {
@@ -474,6 +549,17 @@ module.exports = async function handler(req, res) {
     if (action === "index") {
       const code = /^\d{4}$/.test(String(req.query.code || "")) ? String(req.query.code) : "0001";
       res.status(200).json(await getIndex(code, String(req.query.from || ""), String(req.query.to || "")));
+      return;
+    }
+
+    // 기간별 실현손익(일별)도 종목코드 불필요 (기간만 사용)
+    if (action === "realized") {
+      const end = new Date();
+      const start = new Date(); start.setMonth(start.getMonth() - 6); // 기본 6개월
+      const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def);
+      const from = dt(String(req.query.from || ""), ymd(start));
+      const to = dt(String(req.query.to || ""), ymd(end));
+      res.status(200).json(await getRealized(from, to));
       return;
     }
 

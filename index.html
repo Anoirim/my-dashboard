@@ -287,6 +287,18 @@
       </details>
     </div>
 
+    <!-- 일별 실현손익 -->
+    <div class="card full" data-dept="fin">
+      <h2><span class="dot" style="background:#f5a623"></span>일별 실현손익</h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="date" id="rlzFrom" style="width:160px">
+        <input type="date" id="rlzTo" style="width:160px">
+        <button onclick="loadRealized(event)">불러오기</button>
+        <span class="hint" id="rlzMsg" style="margin:0">불러오면 매매일별 실현손익이 표로 나옵니다.</span>
+      </div>
+      <div id="rlzWrap" style="overflow-x:auto"></div>
+    </div>
+
     <!-- 내 보유 종목 (두 계좌 통합) -->
     <div class="card full" data-dept="fin">
       <h2><span class="dot" style="background:#33d69f"></span>내 보유 종목 (두 계좌 통합)</h2>
@@ -1451,6 +1463,46 @@ function initTradeDates(){
   $("trFrom").value=TRADE_START;
 }
 initTradeDates();
+
+/* ===== 일별 실현손익 ===== */
+let realizedBusy=false;
+function initRealizedDates(){
+  $("rlzTo").value=new Date().toLocaleDateString("sv-SE");
+  $("rlzFrom").value=TRADE_START;
+}
+initRealizedDates();
+async function loadRealized(ev){
+  if(realizedBusy)return; realizedBusy=true;
+  const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
+  const msg=$("rlzMsg"); msg.textContent="불러오는 중... (기간이 길면 시간이 걸려요)";
+  try{
+    const from=($("rlzFrom").value||"").replace(/-/g,""), to=($("rlzTo").value||"").replace(/-/g,"");
+    const r=await fetch(KIS_PROXY+"?action=realized&from="+from+"&to="+to).then(x=>x.json());
+    if(r.error){msg.textContent="오류: "+r.error;return;}
+    renderRealized(r);
+    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 계좌 오류: "+r.errors.join(" / ")):"");
+  }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
+  finally{realizedBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
+}
+function renderRealized(r){
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR");
+  const days=r.days||[];
+  const diag=r.rawKeys?`<div class="hint" style="margin-top:6px">필드 진단(rawKeys): ${esc(r.rawKeys.join(", "))}</div>`:"";
+  if(!days.length){$("rlzWrap").innerHTML='<div class="hint">해당 기간에 실현손익 기록이 없습니다.</div>'+diag;return;}
+  const sign=v=>`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${won(v)}</span>`;
+  let cum=0,tR=0,tF=0,tX=0;
+  const feeTaxAllZero=days.every(d=>!d.fee&&!d.tax);
+  const body=days.map(d=>{
+    cum+=d.realized; tR+=d.realized; tF+=d.fee; tX+=d.tax;
+    const ds=d.date.slice(0,4)+"-"+d.date.slice(4,6)+"-"+d.date.slice(6,8);
+    return `<tr><td class="l">${ds}</td><td>${sign(d.realized)}</td><td>${d.fee?won(d.fee):"-"}</td><td>${d.tax?won(d.tax):"-"}</td><td>${sign(cum)}</td></tr>`;
+  }).join("");
+  $("rlzWrap").innerHTML=`<table class="htbl">
+    <thead><tr><th class="l">날짜</th><th>실현손익</th><th>수수료</th><th>세금</th><th>누계</th></tr></thead>
+    <tbody>${body}</tbody>
+    <tfoot><tr><td class="l">합계</td><td>${sign(tR)}</td><td>${won(tF)}</td><td>${won(tX)}</td><td>${sign(tR)}</td></tr></tfoot>
+  </table>`+(feeTaxAllZero&&r.rawKeys?`<div class="hint" style="margin-top:6px">수수료·세금이 0이면 필드명이 다를 수 있어요. rawKeys: ${esc(r.rawKeys.join(", "))}</div>`:"");
+}
 
 async function loadTrades(ev){
   if(tradesBusy)return;
