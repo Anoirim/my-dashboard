@@ -174,29 +174,6 @@
       <button class="ghost" style="margin-top:14px;width:100%" onclick="resetEye()">오늘 기록 초기화</button>
     </div>
 
-    <!-- 매매 계산기 -->
-    <div class="card" data-dept="research">
-      <h2><span class="dot" style="background:#c77dff"></span>본전·목표가 계산기</h2>
-      <div style="display:flex;flex-direction:column;gap:10px">
-        <div class="row">
-          <input type="number" id="calcBuy" placeholder="매수가 (원)" style="flex:1">
-        </div>
-        <div class="row">
-          <input type="number" id="calcFee" placeholder="수수료율 편도(%)" value="0.015" step="0.001" style="flex:1">
-          <select id="calcType" style="flex:1">
-            <option value="stock">주식 (거래세 0.20%)</option>
-            <option value="etf">ETF (거래세 면제)</option>
-          </select>
-        </div>
-        <div class="row">
-          <input type="number" id="calcTarget" placeholder="목표 순수익률(%) - 선택" step="0.1" style="flex:1">
-          <button onclick="calcTrade()">계산</button>
-        </div>
-      </div>
-      <div id="calcOut" class="easy" style="display:none;margin-top:14px"></div>
-      <div class="hint" style="margin-top:8px">수수료율은 본인 계좌 기준으로 입력하세요(HTS 수수료 안내에서 확인).</div>
-    </div>
-
     <!-- 손절 후 재매수 계산 -->
     <div class="card full" data-dept="research">
       <h2><span class="dot" style="background:#f5a623"></span>손절 후 재매수 계산</h2>
@@ -858,33 +835,8 @@ $("cardBill").addEventListener("keydown",e=>{if(e.key==="Enter")addCard();});
 $("fxAmt").addEventListener("keydown",e=>{if(e.key==="Enter")addFixed();});
 loadMonth(curMonth);
 
-/* ===== 매매 계산기 (본전가 · 목표가) ===== */
+/* ===== 공용: 원화 포맷 ===== */
 function won(n){return Math.round(n).toLocaleString("ko-KR")+"원";}
-function calcTrade(){
-  const P=parseFloat($("calcBuy").value);
-  const c=(parseFloat($("calcFee").value)||0)/100;      // 편도 수수료율
-  const t=$("calcType").value==="etf"?0:0.002;          // 증권거래세(ETF 면제)
-  const out=$("calcOut");
-  if(!P||P<=0){out.style.display="block";out.innerHTML='<div class="easy-n">매수가를 입력하세요.</div>';return;}
-  const denom=1-c-t;
-  const bep=P*(1+c)/denom;              // 본전 매도가
-  const bepRise=(bep/P-1)*100;          // 본전 상승률
-  const invested=P*(1+c);               // 수수료 포함 매수 원가
-  const rows=[
-    ["본전 매도가", won(bep), `여기서 팔면 수수료·세금 빼고 <b>손익 0</b>. 즉 최소 <b>+${bepRise.toFixed(2)}%</b>는 올라야 본전이에요.`],
-    ["매수 원가", won(invested), "매수가 + 매수수수료 (실제 들어간 돈)"]
-  ];
-  const r=parseFloat($("calcTarget").value);
-  if(r>0){
-    const target=P*(1+c)*(1+r/100)/denom;
-    const targetRise=(target/P-1)*100;
-    rows.push(["목표 매도가", won(target),
-      `순수익 <b>+${r}%</b>를 남기려면 이 가격에 팔아야 해요. (매수가 대비 <b>+${targetRise.toFixed(2)}%</b>)`]);
-  }
-  out.style.display="block";
-  out.innerHTML='<div class="easy-title">💰 계산 결과 ('+($("calcType").value==="etf"?"ETF":"주식")+')</div>'
-    + rows.map(x=>`<div class="easy-row"><div class="easy-k">${x[0]}</div><div class="easy-v">${x[1]}</div><div class="easy-n">${x[2]}</div></div>`).join("");
-}
 // 보유종목을 손절재매수 select에 채운다. 같은 종목이 두 계좌에 있을 수 있어 값은 인덱스로 둔다.
 function fillSwStockOptions(){
   const sel=$("swStock");if(!sel)return;
