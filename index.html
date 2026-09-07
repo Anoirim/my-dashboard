@@ -270,6 +270,10 @@
           <option value="buy">매수</option>
           <option value="sell">매도</option>
         </select>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted)" title="켜면 1분마다 오늘 체결·보유종목을 자동 갱신합니다(장중에만 조회).">
+          <input type="checkbox" id="trAuto" onchange="toggleAutoRefresh()">자동 갱신(1분)
+        </label>
+        <span class="hint" id="trClock" style="margin:0"></span>
         <span class="hint" id="trMsg" style="margin:0"></span>
       </div>
       <div class="exp-sum" id="pnlSum"></div>
@@ -1465,6 +1469,46 @@ function initTradeDates(){
   $("trFrom").value=TRADE_START;
 }
 initTradeDates();
+
+/* ===== 장중 시계 + 자동 갱신(1분, 오늘분만) ===== */
+// 사용자 PC 시간대와 무관하게 KST 기준으로 장중을 판정한다(정규장 평일 09:00~15:30).
+function marketState(){
+  const kst=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
+  const day=kst.getDay(), m=kst.getHours()*60+kst.getMinutes();
+  if(day===0||day===6)return{open:false,label:"주말 휴장"};
+  if(m>=540&&m<=930)return{open:true,label:"🟢 장중"};
+  return{open:false,label:"🔴 장 마감"};
+}
+function tickClock(){
+  const el=$("trClock"); if(!el)return;
+  const kst=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
+  const p=n=>String(n).padStart(2,"0");
+  el.textContent=`${p(kst.getHours())}:${p(kst.getMinutes())}:${p(kst.getSeconds())} · ${marketState().label} (정규장 09:00~15:30)`;
+}
+setInterval(tickClock,1000); tickClock();
+let autoTimer=null, autoBusy=false;
+function toggleAutoRefresh(){
+  if($("trAuto").checked){
+    if(marketState().open)refreshToday();
+    autoTimer=setInterval(()=>{ if(marketState().open)refreshToday(); },60000); // 장중에만 실제 조회
+  }else if(autoTimer){ clearInterval(autoTimer); autoTimer=null; }
+}
+// 오늘분 체결만 다시 받아 기존 목록의 오늘분을 교체하고, 잔고도 갱신해 손익요약·자산추이까지 재렌더한다.
+async function refreshToday(){
+  if(autoBusy||tradesBusy)return; autoBusy=true;
+  try{
+    const today=new Date().toLocaleDateString("sv-SE").replace(/-/g,"");
+    const b=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json()).catch(()=>null);
+    await new Promise(s=>setTimeout(s,700)); // 계좌 조회 간격(초당 제한 회피)
+    const r=await fetch(KIS_PROXY+"?action=trades&from="+today+"&to="+today).then(x=>x.json()).catch(()=>null);
+    if(b&&!b.error){ lastBal=b; lastHoldings=b.holdings||lastHoldings; showHoldings(lastHoldings); }
+    if(r&&!r.error){ const todays=r.trades||[]; lastTrades=lastTrades.filter(t=>String(pickTr(t,TR_F.date))!==today).concat(todays); }
+    renderTrades(lastTrades);
+    const t=new Date().toLocaleTimeString("ko-KR");
+    $("hMsg").textContent="자동갱신: "+t; $("trMsg").textContent="자동갱신: "+t;
+  }catch(e){}
+  finally{ autoBusy=false; }
+}
 
 /* ===== 일별 실현손익 ===== */
 let realizedBusy=false;
