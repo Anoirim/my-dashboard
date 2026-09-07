@@ -1426,19 +1426,28 @@ function marketState(){
   if(m>=540&&m<=930)return{open:true,label:"🟢 장중"};
   return{open:false,label:"🔴 장 마감"};
 }
+let prevMarketOpen=null;
 function tickClock(){
   const el=$("trClock"); if(!el)return;
   const kst=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
   const p=n=>String(n).padStart(2,"0");
+  const open=marketState().open;
   el.textContent=`${p(kst.getHours())}:${p(kst.getMinutes())}:${p(kst.getSeconds())} · ${marketState().label} (정규장 09:00~15:30)`;
+  // 장 상태 전환 시 자동갱신 체크를 시장에 맞춘다(장중 자동 체크·장마감 자동 해제). 정지 구간의 수동 토글은 건드리지 않는다.
+  if(prevMarketOpen!==null && open!==prevMarketOpen){
+    const cb=$("trAuto");
+    if(cb && cb.checked!==open){ cb.checked=open; toggleAutoRefresh(); }
+  }
+  prevMarketOpen=open;
 }
 setInterval(tickClock,1000); tickClock();
 let trAutoTimer=null, autoBusy=false;
-function toggleAutoRefresh(){
+function toggleAutoRefresh(skipImmediate){
+  if(trAutoTimer){ clearInterval(trAutoTimer); trAutoTimer=null; } // 중복 타이머 방지
   if($("trAuto").checked){
-    if(marketState().open)refreshToday();
+    if(!skipImmediate && marketState().open)refreshToday();
     trAutoTimer=setInterval(()=>{ if(marketState().open)refreshToday(); },60000); // 장중에만 실제 조회
-  }else if(trAutoTimer){ clearInterval(trAutoTimer); trAutoTimer=null; }
+  }
 }
 // 오늘분 체결만 다시 받아 기존 목록의 오늘분을 교체하고, 잔고도 갱신해 손익요약·자산추이까지 재렌더한다.
 async function refreshToday(){
@@ -1556,6 +1565,7 @@ async function loadTrades(ev){
     await loadEquity(); // 추이는 같은 데이터로 만드니 버튼 없이 이어서 그린다
     await new Promise(s=>setTimeout(s,700));
     await fetchRealizedRange(from,to); renderRealizedRange(from,to); // 실현손익도 같은 조회에 통합
+    const cb=$("trAuto"); if(cb){ cb.checked=marketState().open; toggleAutoRefresh(true); } // 장중이면 자동갱신 켜기(방금 받았으니 즉시 재조회 생략)
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
   finally{tradesBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
