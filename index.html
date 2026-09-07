@@ -1241,7 +1241,7 @@ function renderHoldings(hs){
     const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
     return `<tr onclick="showHoldChart('${h.code}')" style="cursor:pointer">
       <td class="l"><span class="acct">${h.account}</span></td>
-      <td class="l">${h.name}<span style="color:var(--muted);font-size:11px"> ${h.code}</span></td>
+      <td class="l">${h.name}<span style="color:var(--muted);font-size:10px"> ${h.code}</span></td>
       <td>${h.qty.toLocaleString()}</td>
       <td>${won(h.avg)}</td>
       <td>${won(h.price)}</td>
@@ -1252,7 +1252,7 @@ function renderHoldings(hs){
       <td class="${up?"up":"down"}">${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
       <td>${won(bep)}</td>
       <td style="color:var(--accent2)">${won(target)}</td>
-      <td onclick="event.stopPropagation()" style="white-space:nowrap"><input type="number" step="any" value="${htEntry(h.code)?.v??''}" onchange="setHtVal('${h.code}',this.value)" placeholder="목표" style="width:62px;padding:2px 4px"><select onchange="setHtUnit('${h.code}',this.value)" style="padding:2px 2px;margin-left:2px"><option value="price"${htEntry(h.code)?.unit!=="pct"?" selected":""}>가격</option><option value="pct"${htEntry(h.code)?.unit==="pct"?" selected":""}>%</option></select></td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap"><input type="number" step="any" value="${htEntry(h.code)?.v??''}" onchange="setHtVal('${h.code}',this.value)" placeholder="목표" style="width:92px;padding:2px 4px"><select onchange="setHtUnit('${h.code}',this.value)" style="padding:2px 2px;margin-left:2px"><option value="price"${htEntry(h.code)?.unit!=="pct"?" selected":""}>가격</option><option value="pct"${htEntry(h.code)?.unit==="pct"?" selected":""}>%</option></select></td>
       <td onclick="event.stopPropagation()"><input type="number" step="any" value="${htEntry(h.code)?.qty??''}" onchange="setHtQty('${h.code}',this.value)" placeholder="${h.qty}" style="width:62px;padding:2px 4px"></td>
       <td id="hgain_${h.code}">${holdGainHtml(h)}</td>
     </tr>`;
