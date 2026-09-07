@@ -1486,12 +1486,12 @@ function tickClock(){
   el.textContent=`${p(kst.getHours())}:${p(kst.getMinutes())}:${p(kst.getSeconds())} · ${marketState().label} (정규장 09:00~15:30)`;
 }
 setInterval(tickClock,1000); tickClock();
-let autoTimer=null, autoBusy=false;
+let trAutoTimer=null, autoBusy=false;
 function toggleAutoRefresh(){
   if($("trAuto").checked){
     if(marketState().open)refreshToday();
-    autoTimer=setInterval(()=>{ if(marketState().open)refreshToday(); },60000); // 장중에만 실제 조회
-  }else if(autoTimer){ clearInterval(autoTimer); autoTimer=null; }
+    trAutoTimer=setInterval(()=>{ if(marketState().open)refreshToday(); },60000); // 장중에만 실제 조회
+  }else if(trAutoTimer){ clearInterval(trAutoTimer); trAutoTimer=null; }
 }
 // 오늘분 체결만 다시 받아 기존 목록의 오늘분을 교체하고, 잔고도 갱신해 손익요약·자산추이까지 재렌더한다.
 async function refreshToday(){
