@@ -954,7 +954,18 @@ async function loadStockKR(silent){
     $("stockPrice").textContent=d.price.toLocaleString("ko-KR")+"원";
     $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
     $("stockChg").className="chg "+(up?"up":"down");
-    $("stockMeta").textContent=`고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`;
+    // 보유 중인 종목이면 매입가·본전가·손익을 함께 보인다(보유종목 표와 같은 기준).
+    const held=(lastHoldings||[]).find(h=>h.code===sym);
+    let holdLine="";
+    if(held){
+      const w=n=>Math.round(n).toLocaleString("ko-KR");
+      const fee=acctFee(held.account), tax=isEtfName(held.name)?0:0.002;
+      const bep=held.avg*(1+fee)/(1-fee-tax);
+      const pnl=(d.price-held.avg)*held.qty, rate=held.avg?(d.price/held.avg-1)*100:0;
+      const col=pnl>=0?"var(--accent2)":"var(--danger)";
+      holdLine=`<br><b>보유</b> ${held.qty.toLocaleString()}주 · 매입가 ${w(held.avg)} · 본전가 ${w(bep)} · 손익 <b style="color:${col}">${pnl>=0?"+":""}${w(pnl)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</b>`;
+    }
+    $("stockMeta").innerHTML=`고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`+holdLine;
     $("stockResult").style.display="block";
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+($("autoRefresh").checked?" · 실시간 켜짐":"");
     if(!silent){
