@@ -304,10 +304,11 @@
     <div class="card full" data-dept="fin">
       <h2><span class="dot" style="background:#33d69f"></span>내 보유 종목 (두 계좌 통합)</h2>
       <div class="row" style="margin-bottom:12px;align-items:center">
-        <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)">
+        <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)" title="세금·수수료를 빼고 순수익으로 이 %를 남기려면 얼마에 팔아야 하는지 '목표가(+X%)' 열에 종목마다 자동 계산합니다.">
         <button onclick="loadHoldings(event)">불러오기</button>
         <span class="hint" id="hMsg" style="margin:0"></span>
       </div>
+      <div class="hint" style="margin:-4px 0 10px">목표 수익률(%) — 세금·수수료 빼고 순수익 이만큼 남기는 '목표가(+X%)'를 종목마다 자동 계산합니다.</div>
       <div id="holdingsWrap" style="overflow-x:auto"></div>
       <div id="hChartBox" style="display:none;margin-top:14px">
         <canvas id="hChart" height="90"></canvas>
