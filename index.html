@@ -956,14 +956,14 @@ async function loadStockKR(silent){
     $("stockChg").className="chg "+(up?"up":"down");
     // 보유 중인 종목이면 매입가·본전가·손익을 함께 보인다(보유종목 표와 같은 기준).
     const held=(lastHoldings||[]).find(h=>h.code===sym);
-    let holdLine="";
+    let holdLine="", hAvg=0, hBep=0;
     if(held){
       const w=n=>Math.round(n).toLocaleString("ko-KR");
       const fee=acctFee(held.account), tax=isEtfName(held.name)?0:0.002;
-      const bep=held.avg*(1+fee)/(1-fee-tax);
+      hAvg=held.avg; hBep=held.avg*(1+fee)/(1-fee-tax);
       const pnl=(d.price-held.avg)*held.qty, rate=held.avg?(d.price/held.avg-1)*100:0;
       const col=pnl>=0?"var(--accent2)":"var(--danger)";
-      holdLine=`<br><b>보유</b> ${held.qty.toLocaleString()}주 · 매입가 ${w(held.avg)} · 본전가 ${w(bep)} · 손익 <b style="color:${col}">${pnl>=0?"+":""}${w(pnl)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</b>`;
+      holdLine=`<br><b>보유</b> ${held.qty.toLocaleString()}주 · 매입가 ${w(hAvg)} · 본전가 ${w(hBep)} · 손익 <b style="color:${col}">${pnl>=0?"+":""}${w(pnl)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</b>`;
     }
     $("stockMeta").innerHTML=`고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`+holdLine;
     $("stockResult").style.display="block";
@@ -972,7 +972,7 @@ async function loadStockKR(silent){
       // 전체 응답에 재무·차트 포함
       lastFinanceKR=(d.roe!=null||d.debtRatio!=null)?{roe:d.roe,debtRatio:d.debtRatio}:null;
       renderEasyKR(d,up);
-      if(d.candles&&d.candles.length>1)drawDailyKR(d.candles,nm);else drawSimpleKR(d);
+      if(d.candles&&d.candles.length>1)drawDailyKR(d.candles,nm,hAvg,hBep);else drawSimpleKR(d);
     }
     // 실시간(silent) 갱신 때는 헤더 현재가만 갱신하고, 해석·차트는 마지막 수동조회 상태 유지
   }catch(e){msg.textContent="프록시 연결 실패. Vercel 배포와 환경변수를 확인하세요.";}
@@ -988,16 +988,20 @@ function drawSimpleKR(d){
       scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},x:{ticks:{color:"#8b97ad"},grid:{display:false}}}}
   });
 }
-function drawDailyKR(candles,name){
+function drawDailyKR(candles,name,avg,bep){
   const ctx=$("stockChart").getContext("2d");
   if(chart)chart.destroy();
+  const won=n=>Math.round(n).toLocaleString("ko-KR");
   const labels=candles.map(c=>c.date.slice(4,6)+"/"+c.date.slice(6,8));
   const data=candles.map(c=>c.close);
   const rising=data[data.length-1]>=data[0];
+  // 보유 종목이면 매입가(주황)·본전가(빨강) 수평 기준선을 얹는다. 값이 붙어 겹치므로 범례에 수치를 병기한다.
+  const datasets=[{label:"종가",data,borderColor:rising?"#33d69f":"#ff5c72",backgroundColor:"transparent",borderWidth:2,pointRadius:0,tension:.15}];
+  if(avg>0)datasets.push({label:"매입가 "+won(avg),data:data.map(()=>avg),borderColor:"#f5a623",borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,tension:0});
+  if(bep>0)datasets.push({label:"본전가 "+won(bep),data:data.map(()=>bep),borderColor:"#e5484d",borderWidth:1.5,borderDash:[3,3],pointRadius:0,pointHoverRadius:0,tension:0});
   chart=new Chart(ctx,{type:"line",
-    data:{labels,datasets:[{data,borderColor:rising?"#33d69f":"#ff5c72",
-      backgroundColor:"transparent",borderWidth:2,pointRadius:0,tension:.15}]},
-    options:{plugins:{legend:{display:false},title:{display:true,text:name+" 최근 시세(종가)",color:"#8b97ad"}},
+    data:{labels,datasets},
+    options:{plugins:{legend:{display:(avg>0||bep>0),position:"top",labels:{color:"#8b97ad",boxWidth:14,font:{size:11}}},title:{display:true,text:name+" 최근 시세(종가)",color:"#8b97ad"}},
       scales:{y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
         x:{ticks:{color:"#8b97ad",maxTicksLimit:8},grid:{display:false}}}}
   });
