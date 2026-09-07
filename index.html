@@ -1187,10 +1187,29 @@ async function loadHoldings(ev){
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCT1_NO 등)와 배포를 확인하세요.";}
   finally{holdingsBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
+let holdTargets=JSON.parse(localStorage.getItem("holdTargets")||"{}");
+// 목표가에서 세금·왕복 수수료를 뺀 실현이익. 목표가 미입력이면 "-". 수수료는 hFee, ETF는 거래세 면제.
+function holdGainHtml(h){
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR");
+  const T=holdTargets[h.code];
+  if(!(T>0))return '<span style="color:var(--muted)">-</span>';
+  const fee=(parseFloat($("hFee").value)||0)/100, tax=isEtfName(h.name)?0:0.002;
+  const gain=(T*(1-fee-tax)-h.avg*(1+fee))*h.qty;
+  const cost=h.avg*h.qty*(1+fee), rate=cost?gain/cost*100:0;
+  return `<span class="${gain>=0?"up":"down"}">${gain>=0?"+":""}${won(gain)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</span>`;
+}
+function setHoldTarget(code,val){
+  const v=parseFloat(val);
+  if(v>0)holdTargets[code]=v; else delete holdTargets[code];
+  localStorage.setItem("holdTargets",JSON.stringify(holdTargets));
+  autoSaveFile();
+  const h=(lastHoldings||[]).find(x=>x.code===code), cell=$("hgain_"+code);
+  if(h&&cell)cell.innerHTML=holdGainHtml(h);
+}
 function renderHoldings(hs){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const fee=(parseFloat($("hFee").value)||0)/100, tgt=(parseFloat($("hTarget").value)||0)/100;
-  let totCost=0,totEval=0,totPnl=0,totTarget=0;
+  let totCost=0,totEval=0,totPnl=0,totTarget=0,totGain=0;
   const evalAmtOf=h=>h.evalAmt||h.price*h.qty;
   const sumEval=hs.reduce((s,h)=>s+evalAmtOf(h),0);
   const sumPnl=hs.reduce((s,h)=>s+(h.pnl||0),0);
@@ -1199,6 +1218,7 @@ function renderHoldings(hs){
     const etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
     const bep=h.avg*(1+fee)/denom, target=h.avg*(1+fee)*(1+tgt)/denom;
     const cost=h.avg*h.qty; totCost+=cost; totEval+=evalAmtOf(h); totPnl+=(h.pnl||0); totTarget+=target*h.qty;
+    if(holdTargets[h.code]>0)totGain+=(holdTargets[h.code]*(1-fee-tax)-h.avg*(1+fee))*h.qty;
     const up=(h.pnl||0)>=0;
     // 총손익이 0에 가까우면 기여도가 폭주해 숫자가 무의미해진다
     const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
@@ -1215,6 +1235,8 @@ function renderHoldings(hs){
       <td class="${up?"up":"down"}">${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
       <td>${won(bep)}</td>
       <td style="color:var(--accent2)">${won(target)}</td>
+      <td onclick="event.stopPropagation()"><input type="number" step="any" value="${holdTargets[h.code]??''}" onchange="setHoldTarget('${h.code}',this.value)" placeholder="목표가" style="width:88px;padding:2px 4px"></td>
+      <td id="hgain_${h.code}">${holdGainHtml(h)}</td>
     </tr>`;
   }).join("");
   const tup=totPnl>=0;
@@ -1223,6 +1245,7 @@ function renderHoldings(hs){
       <th class="l">계좌</th><th class="l">종목</th><th>수량</th><th>매입가</th><th>현재가</th>
       <th>평가금액</th><th>비중</th><th>평가손익</th><th>손익률</th><th>기여도</th>
       <th>본전가</th><th>목표가(+${$("hTarget").value}%)</th>
+      <th>목표가 입력</th><th>예상이익</th>
     </tr></thead>
     <tbody>${body}</tbody>
     <tfoot><tr>
@@ -1235,11 +1258,14 @@ function renderHoldings(hs){
       <td>100%</td>
       <td></td>
       <td style="color:var(--accent2)">${won(totTarget)}</td>
+      <td></td>
+      <td class="${totGain>=0?'up':'down'}">${totGain>=0?'+':''}${won(totGain)}</td>
     </tr></tfoot>
   </table>`;
   $("hNote").innerHTML=`<b>비중</b> 평가금액 기준 포트폴리오 점유율 · `
     +`<b>기여도</b> 총손익 ${tup?"+":""}${won(totPnl)}원 중 이 종목이 차지하는 비율`
-    +`<br>기여도가 음수면 전체가 손실인데 이 종목은 이익이라는 뜻입니다.`;
+    +`<br>기여도가 음수면 전체가 손실인데 이 종목은 이익이라는 뜻입니다.`
+    +`<br><b>예상이익</b> 입력한 목표가에 세금·왕복 수수료를 반영한 실현이익 (ETF는 거래세 면제)`;
 }
 
 /* ===== 목표 현금 만들기 ===== */
