@@ -258,18 +258,13 @@
     </div>
 
 
-    <!-- 거래내역 (체결 기록) -->
+    <!-- 내 계좌 현황 (거래내역 + 보유종목 통합) -->
     <div class="card full" data-dept="fin">
-      <h2><span class="dot" style="background:#c77dff"></span>거래내역 (체결 기록)</h2>
+      <h2><span class="dot" style="background:#c77dff"></span>내 계좌 현황</h2>
       <div class="row" style="margin-bottom:12px;align-items:center">
         <input type="date" id="trFrom" style="width:160px">
         <input type="date" id="trTo" style="width:160px">
         <button onclick="loadTrades(event)">불러오기</button>
-        <select id="trSide" onchange="renderTrades(lastTrades)" style="width:110px">
-          <option value="all">전체</option>
-          <option value="buy">매수</option>
-          <option value="sell">매도</option>
-        </select>
         <label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted)" title="켜면 1분마다 오늘 체결·보유종목을 자동 갱신합니다(장중에만 조회).">
           <input type="checkbox" id="trAuto" onchange="toggleAutoRefresh()">자동 갱신(1분)
         </label>
@@ -278,16 +273,44 @@
       </div>
       <div class="exp-sum" id="pnlSum"></div>
       <div class="hint" id="pnlNote" style="margin-bottom:14px"></div>
-      <div class="row" style="margin:0 0 8px;align-items:center;gap:8px">
-        <span style="color:var(--muted);font-size:13px;font-weight:600">자산 추이</span>
-        <span class="hint" id="eqMsg" style="margin:0">거래내역을 불러오면 자동으로 그려집니다.</span>
-      </div>
-      <canvas id="eqChart" height="90"></canvas>
-      <div id="eqDetail" class="easy" style="display:none;margin-top:12px"></div>
-      <div class="hint" id="eqNote" style="margin-top:10px"></div>
-      <details open style="margin-top:16px">
-        <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">체결 내역 표</summary>
-        <div id="tradesWrap" style="overflow-x:auto;margin-top:10px"></div>
+
+      <details open style="margin-top:8px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">보유 종목</summary>
+        <div style="margin-top:10px">
+          <div class="row" style="margin-bottom:8px;align-items:center">
+            <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)" onchange="showHoldings(lastHoldings)" title="세금·수수료를 빼고 순수익으로 이 %를 남기려면 얼마에 팔아야 하는지 '목표가(+X%)' 열에 종목마다 자동 계산합니다.">
+            <span class="hint" id="hMsg" style="margin:0"></span>
+          </div>
+          <div class="hint" style="margin:-4px 0 10px">목표 수익률(%) — 세금·수수료 빼고 순수익 이만큼 남기는 '목표가(+X%)'를 종목마다 자동 계산합니다.</div>
+          <div id="holdingsWrap" style="overflow-x:auto"></div>
+          <div id="hChartBox" style="display:none;margin-top:14px">
+            <canvas id="hChart" height="90"></canvas>
+            <div class="hint" id="hChartNote" style="margin-top:8px"></div>
+          </div>
+          <div class="hint" id="hNote" style="margin-top:10px"></div>
+        </div>
+      </details>
+
+      <details open style="margin-top:12px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">자산 추이</summary>
+        <div style="margin-top:10px">
+          <span class="hint" id="eqMsg" style="margin:0">거래내역을 불러오면 자동으로 그려집니다.</span>
+          <canvas id="eqChart" height="90"></canvas>
+          <div id="eqDetail" class="easy" style="display:none;margin-top:12px"></div>
+          <div class="hint" id="eqNote" style="margin-top:10px"></div>
+        </div>
+      </details>
+
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">체결 내역</summary>
+        <div style="margin-top:10px">
+          <select id="trSide" onchange="renderTrades(lastTrades)" style="width:110px;margin-bottom:8px">
+            <option value="all">전체</option>
+            <option value="buy">매수</option>
+            <option value="sell">매도</option>
+          </select>
+          <div id="tradesWrap" style="overflow-x:auto"></div>
+        </div>
       </details>
     </div>
 
@@ -302,23 +325,6 @@
       </div>
       <canvas id="rlzChart" height="100"></canvas>
       <div class="hint" id="rlzSum" style="margin-top:10px"></div>
-    </div>
-
-    <!-- 내 보유 종목 (두 계좌 통합) -->
-    <div class="card full" data-dept="fin">
-      <h2><span class="dot" style="background:#33d69f"></span>내 보유 종목 (두 계좌 통합)</h2>
-      <div class="row" style="margin-bottom:12px;align-items:center">
-        <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)" title="세금·수수료를 빼고 순수익으로 이 %를 남기려면 얼마에 팔아야 하는지 '목표가(+X%)' 열에 종목마다 자동 계산합니다.">
-        <button onclick="loadHoldings(event)">불러오기</button>
-        <span class="hint" id="hMsg" style="margin:0"></span>
-      </div>
-      <div class="hint" style="margin:-4px 0 10px">목표 수익률(%) — 세금·수수료 빼고 순수익 이만큼 남기는 '목표가(+X%)'를 종목마다 자동 계산합니다.</div>
-      <div id="holdingsWrap" style="overflow-x:auto"></div>
-      <div id="hChartBox" style="display:none;margin-top:14px">
-        <canvas id="hChart" height="90"></canvas>
-        <div class="hint" id="hChartNote" style="margin-top:8px"></div>
-      </div>
-      <div class="hint" id="hNote" style="margin-top:10px"></div>
     </div>
 
     <!-- 목표 현금 만들기 -->
