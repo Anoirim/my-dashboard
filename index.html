@@ -294,9 +294,10 @@
         <input type="date" id="rlzFrom" style="width:160px">
         <input type="date" id="rlzTo" style="width:160px">
         <button onclick="loadRealized(event)">불러오기</button>
-        <span class="hint" id="rlzMsg" style="margin:0">불러오면 매매일별 실현손익이 표로 나옵니다.</span>
+        <span class="hint" id="rlzMsg" style="margin:0">불러오면 매매일별 실현손익이 그래프로 나옵니다.</span>
       </div>
-      <div id="rlzWrap" style="overflow-x:auto"></div>
+      <canvas id="rlzChart" height="100"></canvas>
+      <div class="hint" id="rlzSum" style="margin-top:10px"></div>
     </div>
 
     <!-- 내 보유 종목 (두 계좌 통합) -->
@@ -1466,6 +1467,8 @@ initTradeDates();
 
 /* ===== 일별 실현손익 ===== */
 let realizedBusy=false;
+// KIS는 3개월 지난 행의 세금을 0으로 준다. 신선할 때 받은 값을 보존해 지나도 사라지지 않게 한다.
+let realizedHist=JSON.parse(localStorage.getItem("realizedHist")||"{}");
 function initRealizedDates(){
   $("rlzTo").value=new Date().toLocaleDateString("sv-SE");
   $("rlzFrom").value=TRADE_START;
@@ -1479,29 +1482,69 @@ async function loadRealized(ev){
     const from=($("rlzFrom").value||"").replace(/-/g,""), to=($("rlzTo").value||"").replace(/-/g,"");
     const r=await fetch(KIS_PROXY+"?action=realized&from="+from+"&to="+to).then(x=>x.json());
     if(r.error){msg.textContent="오류: "+r.error;return;}
-    renderRealized(r);
+    // 세금은 신선할 때만 정확 → 받은 값을 보존하고, KIS가 0으로 주면 저장해둔 값을 유지한다.
+    (r.days||[]).forEach(d=>{
+      const p=realizedHist[d.date]||{};
+      realizedHist[d.date]={realized:d.realized,fee:d.fee,sell:d.sell,tax:(d.tax>0?d.tax:(p.tax||0))};
+    });
+    localStorage.setItem("realizedHist",JSON.stringify(realizedHist));
+    autoSaveFile();
+    const days=Object.keys(realizedHist).filter(k=>k>=from&&k<=to).sort().map(k=>({date:k,...realizedHist[k]}));
+    renderRealized({days,rawKeys:r.rawKeys,errors:r.errors});
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 계좌 오류: "+r.errors.join(" / ")):"");
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
   finally{realizedBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
+let rlzChart=null;
 function renderRealized(r){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const days=r.days||[];
-  const diag=r.rawKeys?`<div class="hint" style="margin-top:6px">필드 진단(rawKeys): ${esc(r.rawKeys.join(", "))}</div>`:"";
-  if(!days.length){$("rlzWrap").innerHTML='<div class="hint">해당 기간에 실현손익 기록이 없습니다.</div>'+diag;return;}
-  const sign=v=>`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${won(v)}</span>`;
-  let cum=0,tR=0,tF=0,tX=0;
-  const feeTaxAllZero=days.every(d=>!d.fee&&!d.tax);
-  const body=days.map(d=>{
-    cum+=d.realized; tR+=d.realized; tF+=d.fee; tX+=d.tax;
-    const ds=d.date.slice(0,4)+"-"+d.date.slice(4,6)+"-"+d.date.slice(6,8);
-    return `<tr><td class="l">${ds}</td><td>${sign(d.realized)}</td><td>${d.fee?won(d.fee):"-"}</td><td>${d.tax?won(d.tax):"-"}</td><td>${sign(cum)}</td></tr>`;
-  }).join("");
-  $("rlzWrap").innerHTML=`<table class="htbl">
-    <thead><tr><th class="l">날짜</th><th>실현손익</th><th>수수료</th><th>세금</th><th>누계</th></tr></thead>
-    <tbody>${body}</tbody>
-    <tfoot><tr><td class="l">합계</td><td>${sign(tR)}</td><td>${won(tF)}</td><td>${won(tX)}</td><td>${sign(tR)}</td></tr></tfoot>
-  </table>`+(feeTaxAllZero&&r.rawKeys?`<div class="hint" style="margin-top:6px">수수료·세금이 0이면 필드명이 다를 수 있어요. rawKeys: ${esc(r.rawKeys.join(", "))}</div>`:"");
+  const sum=$("rlzSum");
+  if(!days.length){
+    if(rlzChart){rlzChart.destroy();rlzChart=null;}
+    sum.innerHTML="해당 기간에 실현손익 기록이 없습니다.";
+    return;
+  }
+  const labels=days.map(d=>d.date.slice(4,6)+"/"+d.date.slice(6,8));
+  const vals=days.map(d=>d.realized);
+  let c=0; const cum=days.map(d=>(c+=d.realized));
+  const colors=vals.map(v=>v>=0?"#33d69f":"#ff5c72");
+  // 세금: 실제값 우선, 없으면(과거분) 매도금액×거래세율 0.2%로 추정. 매수만 한 날은 세금 없음.
+  const taxOf=d=>(d.tax>0?{v:d.tax,est:false}:(d.sell>0?{v:Math.round(d.sell*0.002),est:true}:{v:0,est:false}));
+  const tR=vals.reduce((s,v)=>s+v,0), tF=days.reduce((s,d)=>s+d.fee,0), tX=days.reduce((s,d)=>s+taxOf(d).v,0);
+  const anyEst=days.some(d=>!(d.tax>0)&&d.sell>0);
+  if(rlzChart)rlzChart.destroy();
+  rlzChart=new Chart($("rlzChart").getContext("2d"),{type:"bar",
+    data:{labels,datasets:[
+      {type:"bar",label:"일별 실현손익",data:vals,backgroundColor:colors,borderRadius:4,order:2},
+      {type:"line",label:"누계",data:cum,borderColor:"#f5a623",backgroundColor:"transparent",borderWidth:2,pointRadius:0,pointHoverRadius:4,tension:.15,order:1,yAxisID:"y2"}
+    ]},
+    options:{
+      interaction:{mode:"index",intersect:false},
+      plugins:{
+        legend:{display:true,labels:{color:"#8b97ad",boxWidth:14,font:{size:11}}},
+        tooltip:{callbacks:{
+          title:(items)=>{const d=days[items[0].dataIndex].date; return d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8);},
+          label:(item)=>{
+            const d=days[item.dataIndex];
+            if(item.datasetIndex===0){
+              let s="실현손익 "+(d.realized>=0?"+":"")+won(d.realized);
+              if(d.fee)s+=" · 수수료 "+won(d.fee);
+              const t=taxOf(d); if(t.v)s+=" · 세금 "+won(t.v)+(t.est?"(추정)":"");
+              return s;
+            }
+            return "누계 "+(cum[item.dataIndex]>=0?"+":"")+won(cum[item.dataIndex]);
+          }
+        }}
+      },
+      scales:{
+        y:{ticks:{color:"#8b97ad"},grid:{color:"#2a3346"}},
+        y2:{position:"right",ticks:{color:"#f5a623"},grid:{display:false}},
+        x:{ticks:{color:"#8b97ad",maxTicksLimit:12},grid:{display:false}}
+      }
+    }
+  });
+  sum.innerHTML=`합계 실현손익 <b class="${tR>=0?'up':'down'}">${tR>=0?"+":""}${won(tR)}</b> · 수수료 ${won(tF)} · 세금 ${won(tX)}${anyEst?" (과거분 세금 추정 포함)":""}`;
 }
 
 async function loadTrades(ev){
