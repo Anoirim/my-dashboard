@@ -1275,7 +1275,7 @@ function renderHoldings(hs){
       <td>${h.qty.toLocaleString()}</td>
       <td>${won(h.avg)}</td>
       <td>${won(bep)}</td>
-      <td>${won(h.price)}</td>
+      <td class="${h.price>=h.avg?"up":"down"}">${won(h.price)} <span style="font-size:11px">(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})</span></td>
       <td>${won(h.evalAmt)}</td>
       <td>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
       <td class="${up?"up":"down"}">${up?"+":""}${won(h.pnl)}</td>
