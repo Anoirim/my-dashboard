@@ -275,6 +275,14 @@
       <div class="hint" id="pnlNote" style="margin-bottom:14px"></div>
 
       <details open style="margin-top:8px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">일별 실현손익</summary>
+        <div style="margin-top:10px">
+          <canvas id="rlzChart" height="100"></canvas>
+          <div class="hint" id="rlzSum" style="margin-top:10px">불러오면 매매일별 실현손익이 그래프로 나옵니다.</div>
+        </div>
+      </details>
+
+      <details open style="margin-top:12px">
         <summary style="cursor:pointer;color:var(--muted);font-size:13px;font-weight:600">보유 종목</summary>
         <div style="margin-top:10px">
           <div class="row" style="margin-bottom:8px;align-items:center">
@@ -312,19 +320,6 @@
           <div id="tradesWrap" style="overflow-x:auto"></div>
         </div>
       </details>
-    </div>
-
-    <!-- 일별 실현손익 -->
-    <div class="card full" data-dept="fin">
-      <h2><span class="dot" style="background:#f5a623"></span>일별 실현손익</h2>
-      <div class="row" style="margin-bottom:12px;align-items:center">
-        <input type="date" id="rlzFrom" style="width:160px">
-        <input type="date" id="rlzTo" style="width:160px">
-        <button onclick="loadRealized(event)">불러오기</button>
-        <span class="hint" id="rlzMsg" style="margin:0">불러오면 매매일별 실현손익이 그래프로 나옵니다.</span>
-      </div>
-      <canvas id="rlzChart" height="100"></canvas>
-      <div class="hint" id="rlzSum" style="margin-top:10px"></div>
     </div>
 
     <!-- 목표 현금 만들기 -->
@@ -1510,6 +1505,9 @@ async function refreshToday(){
     if(b&&!b.error){ lastBal=b; lastHoldings=b.holdings||lastHoldings; showHoldings(lastHoldings); }
     if(r&&!r.error){ const todays=r.trades||[]; lastTrades=lastTrades.filter(t=>String(pickTr(t,TR_F.date))!==today).concat(todays); }
     renderTrades(lastTrades);
+    await new Promise(s=>setTimeout(s,700));
+    await fetchRealizedRange(today,today);
+    renderRealizedRange(($("trFrom").value||"").replace(/-/g,""),($("trTo").value||"").replace(/-/g,""));
     const t=new Date().toLocaleTimeString("ko-KR");
     $("hMsg").textContent="자동갱신: "+t; $("trMsg").textContent="자동갱신: "+t;
   }catch(e){}
@@ -1517,34 +1515,22 @@ async function refreshToday(){
 }
 
 /* ===== 일별 실현손익 ===== */
-let realizedBusy=false;
 // KIS는 3개월 지난 행의 세금을 0으로 준다. 신선할 때 받은 값을 보존해 지나도 사라지지 않게 한다.
 let realizedHist=JSON.parse(localStorage.getItem("realizedHist")||"{}");
-function initRealizedDates(){
-  $("rlzTo").value=new Date().toLocaleDateString("sv-SE");
-  $("rlzFrom").value=TRADE_START;
+// 실현손익을 받아 realizedHist에 병합·보존한다. 조회는 내 계좌 현황의 불러오기/자동갱신에 통합한다.
+async function fetchRealizedRange(from,to){
+  const r=await fetch(KIS_PROXY+"?action=realized&from="+from+"&to="+to).then(x=>x.json()).catch(()=>null);
+  if(!r||r.error)return;
+  (r.days||[]).forEach(d=>{
+    const p=realizedHist[d.date]||{};
+    realizedHist[d.date]={realized:d.realized,fee:d.fee,sell:d.sell,tax:(d.tax>0?d.tax:(p.tax||0))};
+  });
+  localStorage.setItem("realizedHist",JSON.stringify(realizedHist));
+  autoSaveFile();
 }
-initRealizedDates();
-async function loadRealized(ev){
-  if(realizedBusy)return; realizedBusy=true;
-  const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
-  const msg=$("rlzMsg"); msg.textContent="불러오는 중... (기간이 길면 시간이 걸려요)";
-  try{
-    const from=($("rlzFrom").value||"").replace(/-/g,""), to=($("rlzTo").value||"").replace(/-/g,"");
-    const r=await fetch(KIS_PROXY+"?action=realized&from="+from+"&to="+to).then(x=>x.json());
-    if(r.error){msg.textContent="오류: "+r.error;return;}
-    // 세금은 신선할 때만 정확 → 받은 값을 보존하고, KIS가 0으로 주면 저장해둔 값을 유지한다.
-    (r.days||[]).forEach(d=>{
-      const p=realizedHist[d.date]||{};
-      realizedHist[d.date]={realized:d.realized,fee:d.fee,sell:d.sell,tax:(d.tax>0?d.tax:(p.tax||0))};
-    });
-    localStorage.setItem("realizedHist",JSON.stringify(realizedHist));
-    autoSaveFile();
-    const days=Object.keys(realizedHist).filter(k=>k>=from&&k<=to).sort().map(k=>({date:k,...realizedHist[k]}));
-    renderRealized({days,rawKeys:r.rawKeys,errors:r.errors});
-    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 계좌 오류: "+r.errors.join(" / ")):"");
-  }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
-  finally{realizedBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
+function renderRealizedRange(from,to){
+  const days=Object.keys(realizedHist).filter(k=>k>=from&&k<=to).sort().map(k=>({date:k,...realizedHist[k]}));
+  renderRealized({days});
 }
 let rlzChart=null;
 function renderRealized(r){
@@ -1622,6 +1608,8 @@ async function loadTrades(ev){
     const errs=[].concat(r.errors||[],(b&&b.errors)||[],(b&&b.error)?["잔고: "+b.error]:[]);
     msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(errs.length?(" · 계좌 오류: "+errs.join(" / ")):"");
     await loadEquity(); // 추이는 같은 데이터로 만드니 버튼 없이 이어서 그린다
+    await new Promise(s=>setTimeout(s,700));
+    await fetchRealizedRange(from,to); renderRealizedRange(from,to); // 실현손익도 같은 조회에 통합
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수와 배포를 확인하세요.";}
   finally{tradesBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
