@@ -291,7 +291,6 @@
     <div class="card full" data-dept="fin">
       <h2><span class="dot" style="background:#33d69f"></span>내 보유 종목 (두 계좌 통합)</h2>
       <div class="row" style="margin-bottom:12px;align-items:center">
-        <input type="number" id="hFee" value="0.015" step="0.001" style="width:150px" placeholder="수수료 편도(%)">
         <input type="number" id="hTarget" value="5" step="0.5" style="width:150px" placeholder="목표 수익률(%)">
         <button onclick="loadHoldings(event)">불러오기</button>
         <span class="hint" id="hMsg" style="margin:0"></span>
@@ -908,9 +907,9 @@ function calcSwitch(){
   const rec=parseFloat($("swRecover").value); // 선택
   const fail=m=>{out.style.display="block";out.innerHTML=`<div class="easy-n">${m}</div>`;};
   if(!(avg>0&&qty>0&&sell>0&&buy>0))return fail("평단·수량·매도가·재매수가를 모두 입력하세요.");
-  const fee=(parseFloat($("hFee").value)||0)/100;
   // 거래세는 매도 종목 기준. select로 고른 종목이면 ETF 판정, 아니면 주식 가정.
   const i=$("swStock").value;
+  const fee=(i!==""&&lastHoldings[i])?acctFee(lastHoldings[i].account):0.015/100;
   const isEtf=(i!==""&&lastHoldings[i])?isEtfName(lastHoldings[i].name):false;
   const tax=isEtf?0:0.002;
   const C=sell*qty*(1-fee-tax);                    // 매도 실수령(재매수에 쓸 현금)
@@ -1187,6 +1186,13 @@ async function loadHoldings(ev){
   }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCT1_NO 등)와 배포를 확인하세요.";}
   finally{holdingsBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
 }
+// 계좌별 편도 수수료율. 수동 입력 대신 계좌명으로 자동 적용(우대 0.0016% / ISA 0.015% / 그 외 기본).
+function acctFee(account){
+  const a=account||"";
+  if(a.includes("우대"))return 0.0016/100;
+  if(a.includes("ISA"))return 0.015/100;
+  return 0.015/100;
+}
 let holdTargets=JSON.parse(localStorage.getItem("holdTargets")||"{}");
 // 저장 형식: {v:목표값, unit:"price"|"pct", qty:판매수량}. 구버전(숫자)은 가격으로 마이그레이션.
 function htEntry(code){
@@ -1197,7 +1203,7 @@ function htEntry(code){
 }
 // 단위에 따라 목표가 산출. pct면 목표 순수익률 → 기존 목표가 공식과 동일.
 function htTargetPrice(h,e){
-  const fee=(parseFloat($("hFee").value)||0)/100, tax=isEtfName(h.name)?0:0.002;
+  const fee=acctFee(h.account), tax=isEtfName(h.name)?0:0.002;
   if(e.unit==="pct")return h.avg*(1+fee)*(1+(e.v||0)/100)/(1-fee-tax);
   return e.v;
 }
@@ -1206,7 +1212,7 @@ function holdGainHtml(h){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const e=htEntry(h.code);
   if(!e||!(e.v>0))return '<span style="color:var(--muted)">-</span>';
-  const fee=(parseFloat($("hFee").value)||0)/100, tax=isEtfName(h.name)?0:0.002;
+  const fee=acctFee(h.account), tax=isEtfName(h.name)?0:0.002;
   const T=htTargetPrice(h,e), qty=(e.qty>0?e.qty:h.qty);
   const gain=(T*(1-fee-tax)-h.avg*(1+fee))*qty;
   const cost=h.avg*qty*(1+fee), rate=cost?gain/cost*100:0;
@@ -1225,14 +1231,14 @@ function setHtUnit(code,unit){htSave(code,{unit});}
 function setHtQty(code,val){const q=parseFloat(val); htSave(code,{qty:isNaN(q)?0:q});}
 function renderHoldings(hs){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
-  const fee=(parseFloat($("hFee").value)||0)/100, tgt=(parseFloat($("hTarget").value)||0)/100;
+  const tgt=(parseFloat($("hTarget").value)||0)/100;
   let totCost=0,totEval=0,totPnl=0,totTarget=0,totGain=0;
   const evalAmtOf=h=>h.evalAmt||h.price*h.qty;
   const sumEval=hs.reduce((s,h)=>s+evalAmtOf(h),0);
   const sumPnl=hs.reduce((s,h)=>s+(h.pnl||0),0);
   const ratio=(v,base)=>base?v/base*100:0;
   const body=hs.map(h=>{
-    const etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
+    const fee=acctFee(h.account), etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
     const bep=h.avg*(1+fee)/denom, target=h.avg*(1+fee)*(1+tgt)/denom;
     const cost=h.avg*h.qty; totCost+=cost; totEval+=evalAmtOf(h); totPnl+=(h.pnl||0); totTarget+=target*h.qty;
     { const e=htEntry(h.code); if(e&&e.v>0){ const T=e.unit==="pct"?h.avg*(1+fee)*(1+(e.v||0)/100)/denom:e.v; totGain+=(T*(1-fee-tax)-h.avg*(1+fee))*(e.qty>0?e.qty:h.qty); } }
@@ -1315,7 +1321,7 @@ async function showHoldChart(code){
     const avg=h&&h.avg>0?h.avg:0;
     let bep=0;
     if(avg>0){
-      const fee=(parseFloat($("hFee").value)||0)/100, tax=isEtfName(h.name)?0:0.002;
+      const fee=acctFee(h.account), tax=isEtfName(h.name)?0:0.002;
       bep=avg*(1+fee)/(1-fee-tax);
     }
     drawHoldChart(candles,name,avg,bep);
@@ -1359,7 +1365,7 @@ function calcCashOut(){
   if(!lastHoldings.length){msg.textContent="보유 종목을 먼저 불러오세요.";return;}
   const target=parseFloat($("coTarget").value)||0;
   if(target<=0){msg.textContent="필요 금액을 입력하세요.";return;}
-  const fee=(parseFloat($("hFee").value)||0)/100, order=$("coOrder").value;
+  const order=$("coOrder").value;
   // 이미 가진 현금부터 쓴다. 인출 목적이므로 지금 뺄 수 있는 출금가능액 기준.
   const cashNow=(lastBal&&lastBal.cash)||0;
   const cashD2=(lastBal&&lastBal.cashD2)||0;
@@ -1380,7 +1386,7 @@ function calcCashOut(){
   const picks=[];
   list.forEach(h=>{
     if(remain<=0)return;
-    const net=coNet(h,fee);
+    const fee=acctFee(h.account), net=coNet(h,fee);
     if(net<=0)return;
     const qty=Math.min(Math.ceil(remain/net),h.qty);
     if(!qty)return;
@@ -1389,11 +1395,11 @@ function calcCashOut(){
   });
   // 단독: 한 종목만으로 목표를 채울 때
   const solo=list.map(h=>{
-    const net=coNet(h,fee), need=Math.ceil(needCash/net), qty=Math.min(need,h.qty);
+    const fee=acctFee(h.account), net=coNet(h,fee), need=Math.ceil(needCash/net), qty=Math.min(need,h.qty);
     return {h,qty,need,short:need>h.qty,cash:qty*net,pnl:coPnl(h,qty,fee)};
   });
   renderCashOut(picks,solo,{target,needCash,cashNow,cashD2,remain});
-  msg.textContent="수수료 "+($("hFee").value||0)+"% 기준 · ETF는 거래세 면제";
+  msg.textContent="계좌별 수수료 자동 적용 · ETF는 거래세 면제";
 }
 function renderCashOut(picks,solo,ctx){
   const {target,needCash,cashNow,cashD2,remain}=ctx;
