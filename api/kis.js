@@ -70,6 +70,10 @@ function headers(token, tr_id, key, secret) {
 
 const num = (v) => (v === undefined || v === null || v === "" ? null : Number(v));
 const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
+const today = () => ymd(new Date());
+const monthsAgo = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n); return ymd(d); };
+const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def); // YYYYMMDD 아니면 기본값
+const pick = (o, keys) => { for (const k of keys) if (o[k] !== undefined && o[k] !== "") return o[k]; return null; };
 
 async function getPrice(symbol) {
   const token = await getToken();
@@ -92,11 +96,7 @@ async function getPrice(symbol) {
 // 일봉은 1회 응답이 약 100건(5개월)으로 잘려서, 긴 기간은 3개월씩 나눠 받아 합친다.
 async function getDaily(symbol, from, to) {
   const token = await getToken();
-  if (!/^\d{8}$/.test(from || "") || !/^\d{8}$/.test(to || "")) {
-    const end = new Date();
-    const start = new Date(); start.setMonth(start.getMonth() - 5); // 기본 약 5개월
-    from = ymd(start); to = ymd(end);
-  }
+  from = dt(from, monthsAgo(5)); to = dt(to, today()); // 기본 약 5개월
   let name = null;
   const map = {};
   const periods = splitPeriods(from, to);
@@ -124,17 +124,9 @@ const IDX_F = {
   date: ["stck_bsop_date", "bsop_date", "stck_cntg_hour"],
   close: ["bstp_nmix_prpr", "stck_clpr", "bstp_nmix_prdy_clpr", "prpr"],
 };
-function pickIdx(o, keys) {
-  for (const k of keys) if (o[k] !== undefined && o[k] !== "") return o[k];
-  return null;
-}
 async function getIndex(code, from, to) {
   const token = await getToken();
-  if (!/^\d{8}$/.test(from || "") || !/^\d{8}$/.test(to || "")) {
-    const end = new Date();
-    const start = new Date(); start.setMonth(start.getMonth() - 5);
-    from = ymd(start); to = ymd(end);
-  }
+  from = dt(from, monthsAgo(5)); to = dt(to, today());
   const map = {};
   let rawKeys = null;
   const periods = splitPeriods(from, to);
@@ -149,7 +141,7 @@ async function getIndex(code, from, to) {
     const rows = j.output2 || [];
     if (!rawKeys && rows.length) rawKeys = Object.keys(rows[0]);
     rows.forEach((x) => {
-      const d = pickIdx(x, IDX_F.date), c = num(pickIdx(x, IDX_F.close));
+      const d = pick(x, IDX_F.date), c = num(pick(x, IDX_F.close));
       if (d && c) map[String(d)] = { date: String(d), close: c };
     });
   }
@@ -382,7 +374,6 @@ async function tradesOnce(a, trId, from, to, fk, nk) {
 }
 // KIS는 3개월 경계로 TR이 갈려 긴 기간을 한 번에 못 받는다. 3개월 미만 구간으로 잘라 순차 조회한다.
 const parseYmd = (s) => new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
-const fmtYmd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
 function splitPeriods(from, to) {
   const end = parseYmd(to);
   const out = [];
@@ -391,7 +382,7 @@ function splitPeriods(from, to) {
     const stop = new Date(cur);
     stop.setUTCMonth(stop.getUTCMonth() + 3);
     stop.setUTCDate(stop.getUTCDate() - 1);
-    out.push([fmtYmd(cur), fmtYmd(stop > end ? end : stop)]);
+    out.push([ymd(cur), ymd(stop > end ? end : stop)]);
     cur = new Date(stop);
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
@@ -445,10 +436,6 @@ const RLZ_F = {
   tax: ["tl_tax", "tax", "tot_tax"],
   sell: ["sll_amt", "sll_amt_smtl", "sll_excc_amt"],
 };
-function pickF(o, keys) {
-  for (const k of keys) if (o[k] !== undefined && o[k] !== "") return o[k];
-  return null;
-}
 async function realizedOnce(a, trId, from, to, fk, nk) {
   const token = await getTokenFor(a.key, a.secret);
   const q = new URLSearchParams({
@@ -477,13 +464,13 @@ async function realizedPaged(a, from, to, byDate, diag, errors) {
     const rows = j.output1 || [];
     if (!diag.rawKeys && rows.length) { diag.rawKeys = Object.keys(rows[0]); diag.raw1 = rows[0]; }
     rows.forEach((o) => {
-      const d = pickF(o, RLZ_F.date); if (!d) return;
+      const d = pick(o, RLZ_F.date); if (!d) return;
       const key = String(d);
       const rec = byDate[key] || (byDate[key] = { date: key, realized: 0, fee: 0, tax: 0, sell: 0 });
-      rec.realized += num(pickF(o, RLZ_F.realized)) || 0;
-      rec.fee += num(pickF(o, RLZ_F.fee)) || 0;
-      rec.tax += num(pickF(o, RLZ_F.tax)) || 0;
-      rec.sell += num(pickF(o, RLZ_F.sell)) || 0;
+      rec.realized += num(pick(o, RLZ_F.realized)) || 0;
+      rec.fee += num(pick(o, RLZ_F.fee)) || 0;
+      rec.tax += num(pick(o, RLZ_F.tax)) || 0;
+      rec.sell += num(pick(o, RLZ_F.sell)) || 0;
     });
     if (trCont !== "M" && trCont !== "F") return;
     fk = j.ctx_area_fk100 || (j.output2 && j.output2.ctx_area_fk100) || "";
@@ -523,15 +510,12 @@ module.exports = async function handler(req, res) {
 
     // 금리·환율은 한국은행 ECOS라 KIS 토큰도 종목코드도 필요 없다
     if (action === "macro") {
-      const end = new Date();
-      const start = new Date(); start.setMonth(start.getMonth() - 5);
-      const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def);
       res.status(200).json(await getMacro(
         String(req.query.kind || "series"),
         String(req.query.stat || "").trim(),
         String(req.query.item || "").trim(),
-        dt(String(req.query.from || ""), ymd(start)),
-        dt(String(req.query.to || ""), ymd(end)),
+        dt(String(req.query.from || ""), monthsAgo(5)),
+        dt(String(req.query.to || ""), today()),
         String(req.query.q || "").trim()));
       return;
     }
@@ -554,22 +538,16 @@ module.exports = async function handler(req, res) {
 
     // 기간별 실현손익(일별)도 종목코드 불필요 (기간만 사용)
     if (action === "realized") {
-      const end = new Date();
-      const start = new Date(); start.setMonth(start.getMonth() - 6); // 기본 6개월
-      const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def);
-      const from = dt(String(req.query.from || ""), ymd(start));
-      const to = dt(String(req.query.to || ""), ymd(end));
+      const from = dt(String(req.query.from || ""), monthsAgo(6)); // 기본 6개월
+      const to = dt(String(req.query.to || ""), today());
       res.status(200).json(await getRealized(from, to));
       return;
     }
 
     // 체결내역도 종목코드 불필요 (기간만 사용)
     if (action === "trades") {
-      const end = new Date();
-      const start = new Date(); start.setMonth(start.getMonth() - 3); // 기본 3개월
-      const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def);
-      const from = dt(String(req.query.from || ""), ymd(start));
-      const to = dt(String(req.query.to || ""), ymd(end));
+      const from = dt(String(req.query.from || ""), monthsAgo(3)); // 기본 3개월
+      const to = dt(String(req.query.to || ""), today());
       res.status(200).json(await getTrades(from, to));
       return;
     }
@@ -585,8 +563,7 @@ module.exports = async function handler(req, res) {
       const token = await getToken();
       const pUrl = BASE + "/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol;
       const pj = await (await fetch(pUrl, { headers: headers(token, "FHKST01010100") })).json();
-      const end = new Date(); const start = new Date(); start.setMonth(start.getMonth() - 1);
-      const dUrl = BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol + "&FID_INPUT_DATE_1=" + ymd(start) + "&FID_INPUT_DATE_2=" + ymd(end) + "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
+      const dUrl = BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol + "&FID_INPUT_DATE_1=" + monthsAgo(1) + "&FID_INPUT_DATE_2=" + today() + "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
       const dj = await (await fetch(dUrl, { headers: headers(token, "FHKST03010100") })).json();
       out = {
         price_rt_cd: pj.rt_cd, price_msg: pj.msg1,
