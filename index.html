@@ -1430,6 +1430,8 @@ async function refreshToday(){
     await new Promise(s=>setTimeout(s,700));
     await fetchRealizedRange(today,today);
     renderRealizedRange(($("trFrom").value||"").replace(/-/g,""),($("trTo").value||"").replace(/-/g,""));
+    // 주식분석에 국내 종목이 떠 있고 자체 5초 실시간이 꺼져 있으면 주가도 함께 갱신
+    if($("stockResult").style.display!=="none" && $("market").value==="kr" && !$("autoRefresh").checked) loadStock(true);
     const t=new Date().toLocaleTimeString("ko-KR");
     $("hMsg").textContent="자동갱신: "+t; $("trMsg").textContent="자동갱신: "+t;
   }catch(e){}
