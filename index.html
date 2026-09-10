@@ -1365,17 +1365,18 @@ function renderCashOut(picks,solo,ctx){
 
 /* ===== 거래내역 (체결 기록) ===== */
 let lastTrades=[], lastBal=null, tradesBusy=false;
-// KIS 응답 필드명이 확정되지 않아, 후보 키를 순서대로 훑어 처음 나오는 값을 쓴다
+// KIS 공식 스펙(TTTC0081R·CTSC9215R 공통)으로 확정된 필드명.
+// pickTr은 값이 빈 문자열/null인 행을 걸러내는 용도로 남긴다.
 const pickTr=(o,keys)=>{for(const k of keys){if(o[k]!=null&&o[k]!=="")return o[k];}return null;};
 const TR_F={
-  date:["ord_dt","orddt","trad_dt","stck_bsop_date","ccld_dt"],
-  code:["pdno","PDNO"],
-  name:["prdt_name","prdt_abrv_name","hts_kor_isnm"],
-  sideName:["sll_buy_dvsn_cd_name","sll_buy_dvsn_name"],
+  date:["ord_dt"],
+  code:["pdno"],
+  name:["prdt_name"],
+  sideName:["sll_buy_dvsn_cd_name"],
   sideCode:["sll_buy_dvsn_cd"],
-  qty:["tot_ccld_qty","ccld_qty","ord_qty"],
-  price:["avg_prvs","ccld_prvs","ccld_unpr","ord_unpr"],
-  amt:["tot_ccld_amt","ccld_amt"]
+  qty:["tot_ccld_qty"],   // 미체결 주문은 0 → renderTrades에서 제외된다(ord_qty로 대체 금지)
+  price:["avg_prvs"],
+  amt:["tot_ccld_amt"]
 };
 const TRADE_START="2026-01-01"; // 계좌 거래 시작 시점
 function initTradeDates(){
