@@ -392,7 +392,8 @@
         <input type="number" id="cardBill" placeholder="청구액(원)·선택" style="width:140px">
         <button onclick="addCard()">추가</button>
       </div>
-      <ul class="sched-list" id="cardList" style="margin-top:0;max-height:288px"></ul>
+      <!-- 항목 49px + gap 8px 기준 6개 노출 (49*6+8*5=334) -->
+      <ul class="sched-list" id="cardList" style="margin-top:0;max-height:334px"></ul>
 
       <div class="exp-divider"></div>
 
