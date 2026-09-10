@@ -43,6 +43,24 @@
   .sched-item .time{color:var(--accent);font-size:12px;font-weight:600;min-width:44px}
   .sched-item .txt{flex:1;font-size:14px}
   .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
+  /* 식품 재고 */
+  .dept-tab .badge{display:inline-block;min-width:18px;margin-left:6px;padding:1px 5px;border-radius:9px;
+    background:var(--danger);color:#fff;font-size:11px;font-weight:700;line-height:16px;text-align:center}
+  .fd-warn{background:rgba(255,92,114,.12);border:1px solid var(--danger);border-radius:10px;
+    padding:10px 12px;margin-bottom:12px;font-size:13px;line-height:1.7}
+  .fd-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;
+    padding:10px 12px;display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .fd-item.over{border-color:var(--danger)}
+  .fd-item.soon{border-color:#f5a623}
+  .fd-item .nm{flex:1;font-size:14px}
+  .fd-item .tag{font-size:11px;color:var(--muted);border:1px solid var(--border);
+    border-radius:6px;padding:1px 6px;white-space:nowrap}
+  .fd-item .dday{font-size:12px;font-weight:700;min-width:52px;text-align:right}
+  .fd-item .dday.over{color:var(--danger)}
+  .fd-item .dday.soon{color:#f5a623}
+  .fd-item button{padding:5px 9px;font-size:12px}
+  .fd-sec{margin-top:14px}
+  .fd-sec>summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600;margin-bottom:8px}
   /* 주식 */
   .stock-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
   .price{font-size:32px;font-weight:700}
@@ -155,6 +173,28 @@
         <button onclick="addSched()">추가</button>
       </div>
       <ul class="sched-list" id="schedList"></ul>
+    </div>
+
+    <!-- 식품 재고 -->
+    <div class="card full" data-dept="general">
+      <h2><span class="dot" style="background:#f5a623"></span>식품 재고
+        <span id="fdStat" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div id="fdWarn"></div>
+      <div class="row" style="margin-bottom:6px">
+        <input type="text" id="fdName" placeholder="품목 이름" style="flex:1;min-width:140px">
+        <select id="fdType" style="width:130px" onchange="onFdType()"></select>
+        <select id="fdPlace" style="width:100px"></select>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <input type="date" id="fdExp" style="width:150px">
+        <span class="hint" id="fdExpHint" style="flex:1"></span>
+        <button onclick="addFood()">추가</button>
+      </div>
+      <div id="fdList"></div>
+      <details class="fd-sec" id="fdStockSec">
+        <summary id="fdStockSum">비축 (실온)</summary>
+        <div id="fdStockList"></div>
+      </details>
     </div>
 
     <!-- 안약 스케줄러 -->
@@ -600,6 +640,141 @@ function toggleSched(i){scheds[i].done=!scheds[i].done;saveScheds();renderScheds
 function delSched(i){scheds.splice(i,1);saveScheds();renderScheds();}
 $("schedText").addEventListener("keydown",e=>{if(e.key==="Enter")addSched();});
 renderScheds();
+
+/* ===== 식품 재고 (폐기 감소 목적: 위험한 것부터 보여준다) ===== */
+// days=null 이면 유통기한을 직접 입력받는 유형이다.
+const FD_TYPES=[
+  {id:"delivery", name:"배달 음식",   days:2,    place:"냉장", stock:false},
+  {id:"side",     name:"배달 반찬",   days:4,    place:"냉장", stock:false},
+  {id:"cooked",   name:"조리 음식",   days:3,    place:"냉장", stock:false},
+  {id:"chilled",  name:"공산품·냉장", days:null, place:"냉장", stock:false},
+  {id:"frozen",   name:"냉동",        days:30,   place:"냉동", stock:false},
+  {id:"ambient",  name:"상온 가공품", days:null, place:"실온", stock:true}
+];
+const FD_PLACES=["냉장","냉동","야채칸","실온"];
+const FD_SOON=3;      // D-3 이내면 임박 경고
+const FD_PROMOTE=30;  // 실온 품목도 D-30 이내면 급한 구역으로 끌어올린다
+const fdType=id=>FD_TYPES.find(t=>t.id===id)||FD_TYPES[0];
+const fdToday=()=>new Date().toLocaleDateString("sv-SE");
+const fdEsc=s=>String(s).replace(/</g,"&lt;");
+
+let foods=JSON.parse(localStorage.getItem("foods")||"[]");
+let fdLog=JSON.parse(localStorage.getItem("fdLog")||"[]");
+function saveFoods(){localStorage.setItem("foods",JSON.stringify(foods));autoSaveFile();}
+function saveFdLog(){localStorage.setItem("fdLog",JSON.stringify(fdLog));autoSaveFile();}
+
+// 유통기한: 직접 입력값이 있으면 그것을, 없으면 담은 날 + 유형 기본일수
+function fdExpiry(f){
+  if(f.expiry)return f.expiry;
+  const d=fdType(f.type).days;
+  if(d==null)return null;
+  const t=new Date(f.inDate+"T00:00:00");
+  t.setDate(t.getDate()+d);
+  return t.toLocaleDateString("sv-SE");
+}
+function fdDday(f){
+  const e=fdExpiry(f);
+  if(!e)return null;
+  return Math.round((new Date(e+"T00:00:00")-new Date(fdToday()+"T00:00:00"))/86400000);
+}
+// 실온이라도 기한이 가까워지면 급한 구역으로 승격시킨다
+function fdUrgent(f){
+  const d=fdDday(f);
+  if(!fdType(f.type).stock)return true;
+  return d!=null&&d<=FD_PROMOTE;
+}
+function fdLabel(d){
+  if(d==null)return{txt:"기한 없음",cls:""};
+  if(d<0)return{txt:Math.abs(d)+"일 지남",cls:"over"};
+  if(d===0)return{txt:"오늘까지",cls:"over"};
+  if(d<=FD_SOON)return{txt:"D-"+d,cls:"soon"};
+  return{txt:"D-"+d,cls:""};
+}
+
+function onFdType(){
+  const t=fdType($("fdType").value);
+  $("fdPlace").value=t.place;
+  const direct=t.days==null;
+  $("fdExp").disabled=!direct;
+  $("fdExpHint").textContent=direct?"포장의 유통기한을 입력하세요":"자동으로 "+t.days+"일 후로 잡힙니다";
+  if(!direct)$("fdExp").value="";
+}
+function initFoodForm(){
+  $("fdType").innerHTML=FD_TYPES.map(t=>`<option value="${t.id}">${t.name}</option>`).join("");
+  $("fdPlace").innerHTML=FD_PLACES.map(p=>`<option>${p}</option>`).join("");
+  onFdType();
+}
+function addFood(){
+  const name=$("fdName").value.trim();if(!name)return;
+  const t=fdType($("fdType").value);
+  const exp=$("fdExp").value;
+  if(t.days==null&&!exp){$("fdExpHint").textContent="유통기한을 입력해 주세요";return;}
+  foods.push({name,type:t.id,place:$("fdPlace").value,inDate:fdToday(),expiry:t.days==null?exp:"",photo:""});
+  $("fdName").value="";$("fdExp").value="";
+  saveFoods();renderFoods();
+}
+// eaten=true 먹음 / false 버림. 버린 개수는 월별로 세어 행동 교정에 쓴다.
+function doneFood(i,eaten){
+  const f=foods[i];if(!f)return;
+  fdLog.push({name:f.name,type:f.type,eaten,date:fdToday()});
+  foods.splice(i,1);
+  saveFdLog();saveFoods();renderFoods();
+}
+function delFood(i){foods.splice(i,1);saveFoods();renderFoods();}
+
+function fdRow(f,i){
+  const d=fdDday(f), lb=fdLabel(d);
+  return `<div class="fd-item ${lb.cls}">
+    <span class="nm">${fdEsc(f.name)}</span>
+    <span class="tag">${fdEsc(f.place)}</span>
+    <span class="tag">${fdEsc(fdType(f.type).name)}</span>
+    <span class="dday ${lb.cls}">${lb.txt}</span>
+    <button class="ok" onclick="doneFood(${i},true)">먹음</button>
+    <button class="ghost" onclick="doneFood(${i},false)">버림</button>
+    <button class="ghost" onclick="delFood(${i})">✕</button>
+  </div>`;
+}
+function renderFoods(){
+  // 원본 인덱스를 유지해야 버튼이 올바른 항목을 가리킨다
+  const idx=foods.map((f,i)=>i);
+  const risk=f=>{const d=fdDday(f);return d==null?9999:d;};
+  idx.sort((a,b)=>risk(foods[a])-risk(foods[b]));
+  const urgent=idx.filter(i=>fdUrgent(foods[i]));
+  const stock=idx.filter(i=>!fdUrgent(foods[i]));
+
+  $("fdList").innerHTML=urgent.map(i=>fdRow(foods[i],i)).join("")
+    ||'<div class="hint">등록된 품목이 없습니다.</div>';
+  $("fdStockList").innerHTML=stock.map(i=>fdRow(foods[i],i)).join("")
+    ||'<div class="hint">비축 품목이 없습니다.</div>';
+  $("fdStockSum").textContent="비축 (실온) "+stock.length+"개";
+
+  const over=urgent.filter(i=>{const d=fdDday(foods[i]);return d!=null&&d<0;});
+  const soon=urgent.filter(i=>{const d=fdDday(foods[i]);return d!=null&&d>=0&&d<=FD_SOON;});
+  const warn=$("fdWarn");
+  if(over.length||soon.length){
+    const nm=list=>list.slice(0,3).map(i=>fdEsc(foods[i].name)).join(", ")+(list.length>3?" 외 "+(list.length-3)+"개":"");
+    warn.innerHTML=`<div class="fd-warn">`
+      +(over.length?`<div>⚠️ 기한 지남 ${over.length}개 — ${nm(over)}</div>`:"")
+      +(soon.length?`<div>🔔 ${FD_SOON}일 이내 ${soon.length}개 — ${nm(soon)}</div>`:"")
+      +`</div>`;
+  }else warn.innerHTML="";
+
+  const mon=fdToday().slice(0,7);
+  const tossed=fdLog.filter(l=>!l.eaten&&l.date.startsWith(mon)).length;
+  const ate=fdLog.filter(l=>l.eaten&&l.date.startsWith(mon)).length;
+  $("fdStat").textContent=`총 ${foods.length}개 · 이번 달 먹음 ${ate} / 버림 ${tossed}`;
+
+  const badge=over.length+soon.length;
+  const tab=document.querySelector('.dept-tab[data-tab="general"]');
+  if(tab){
+    let b=tab.querySelector(".badge");
+    if(badge){ if(!b){b=document.createElement("span");b.className="badge";tab.appendChild(b);} b.textContent=badge; }
+    else if(b)b.remove();
+  }
+}
+$("fdName").addEventListener("keydown",e=>{if(e.key==="Enter")addFood();});
+initFoodForm();
+renderFoods();
 
 /* ===== 안약 복용 (날짜별, 매일 자동 초기화) ===== */
 const EYE_ITEMS=[
