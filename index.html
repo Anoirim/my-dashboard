@@ -121,6 +121,10 @@
   .htbl tbody tr:hover td{background:var(--card2)}
   .htbl .acct{font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;background:rgba(51,214,159,.15);color:var(--accent2)}
   .htbl tfoot td{font-weight:700;border-top:2px solid var(--accent);border-bottom:none;background:var(--card2)}
+  /* 같은 종목을 여러 계좌에 보유할 때 붙는 통합 행 (합계에는 중복 반영하지 않음) */
+  .htbl tr.hrow-merged td{background:rgba(79,140,255,.08);font-weight:600}
+  .htbl tr.hrow-merged:hover td{background:rgba(79,140,255,.14)}
+  .htbl .acct.merged{background:rgba(79,140,255,.18);color:var(--accent)}
   .b-high{background:rgba(51,214,159,.15);color:var(--accent2)}
   .b-mid{background:rgba(245,166,35,.15);color:#f5a623}
   .b-low{background:rgba(139,151,173,.15);color:var(--muted)}
@@ -1356,11 +1360,15 @@ function acctFee(account){
 }
 let holdTargets=JSON.parse(localStorage.getItem("holdTargets")||"{}");
 // 저장 형식: {v:목표값, unit:"price"|"pct", qty:판매수량}. 구버전(숫자)은 가격으로 마이그레이션.
-function htEntry(code){
-  let e=holdTargets[code];
+// 같은 종목을 여러 계좌에 보유할 수 있어 키는 "계좌|종목코드"다. 코드만 쓰던 구버전 키는 읽을 때 폴백한다.
+const htKey=h=>(h.account||"")+"|"+h.code;
+const htNorm=e=>{
   if(e==null)return null;
-  if(typeof e==="number")e={v:e,unit:"price"};
+  if(typeof e==="number")return{v:e,unit:"price"};
   return e;
+};
+function htEntry(h){
+  return htNorm(holdTargets[htKey(h)]) || htNorm(holdTargets[h.code]);
 }
 // 단위에 따라 목표가 산출. pct면 목표 순수익률 → 기존 목표가 공식과 동일.
 function htTargetPrice(h,e){
@@ -1371,7 +1379,7 @@ function htTargetPrice(h,e){
 // 목표가에 세금·왕복 수수료를 반영한 실현이익. 목표 미입력이면 "-". 수량 미입력이면 보유수량 전량.
 function holdGainHtml(h){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
-  const e=htEntry(h.code);
+  const e=htEntry(h);
   if(!e||!(e.v>0))return '<span style="color:var(--muted)">-</span>';
   const fee=acctFee(h.account), tax=isEtfName(h.name)?0:0.002;
   const T=htTargetPrice(h,e), qty=(e.qty>0?e.qty:h.qty);
@@ -1379,17 +1387,63 @@ function holdGainHtml(h){
   const cost=h.avg*qty*(1+fee), rate=cost?gain/cost*100:0;
   return `<span class="${gain>=0?"up":"down"}">${gain>=0?"+":""}${won(gain)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</span>`;
 }
-function htSave(code,patch){
-  const e=Object.assign({v:0,unit:"price"}, htEntry(code)||{}, patch);
-  holdTargets[code]=e;
+// key는 htKey() 결과. 계좌별로 목표를 따로 저장하며, 갱신 시 통합 행 예상이익도 다시 그린다.
+function htSave(key,patch){
+  const h=(lastHoldings||[]).find(x=>htKey(x)===key);
+  if(!h)return;
+  holdTargets[key]=Object.assign({v:0,unit:"price"}, htEntry(h)||{}, patch);
   localStorage.setItem("holdTargets",JSON.stringify(holdTargets));
   autoSaveFile();
-  const h=(lastHoldings||[]).find(x=>x.code===code), cell=$("hgain_"+code);
-  if(h&&cell)cell.innerHTML=holdGainHtml(h);
+  const cell=$("hgain_"+hcId(h));
+  if(cell)cell.innerHTML=holdGainHtml(h);
+  const g=$("hgain_sum_"+h.code);
+  if(g)g.innerHTML=mergedGainHtml(h.code);
 }
-function setHtVal(code,val){const v=parseFloat(val); htSave(code,{v:isNaN(v)?0:v});}
-function setHtUnit(code,unit){htSave(code,{unit});}
-function setHtQty(code,val){const q=parseFloat(val); htSave(code,{qty:isNaN(q)?0:q});}
+function setHtVal(key,val){const v=parseFloat(val); htSave(key,{v:isNaN(v)?0:v});}
+function setHtUnit(key,unit){htSave(key,{unit});}
+function setHtQty(key,val){const q=parseFloat(val); htSave(key,{qty:isNaN(q)?0:q});}
+/* --- 계좌 통합 (같은 종목이 2개 이상 계좌에 있을 때) --- */
+// DOM id로 쓸 수 있게 계좌명의 비영숫자를 제거한다. 한글 계좌명도 id로 안전하게 들어간다.
+const hcId=h=>h.code+"_"+(h.account||"").replace(/[^0-9A-Za-z가-힣]/g,"");
+// 같은 종목을 가진 계좌가 2곳 이상인 코드만 통합 대상
+function mergedCodes(hs){
+  const c={};
+  hs.forEach(h=>{c[h.code]=(c[h.code]||0)+1;});
+  return new Set(Object.keys(c).filter(k=>c[k]>1));
+}
+// 평단은 가중평균, 수수료도 매입금액 가중평균으로 섞는다(계좌마다 수수료율이 달라서).
+function mergeHoldings(rows){
+  const qty=rows.reduce((s,h)=>s+h.qty,0);
+  const cost=rows.reduce((s,h)=>s+h.avg*h.qty,0);
+  const evalAmt=rows.reduce((s,h)=>s+(h.evalAmt||h.price*h.qty),0);
+  const pnl=rows.reduce((s,h)=>s+(h.pnl||0),0);
+  const fee=cost?rows.reduce((s,h)=>s+acctFee(h.account)*h.avg*h.qty,0)/cost:acctFee("");
+  const avg=qty?cost/qty:0;
+  return{
+    merged:true, code:rows[0].code, name:rows[0].name,
+    account:rows.length+"개 계좌", accounts:rows.map(h=>h.account),
+    qty, avg, price:rows[0].price, evalAmt, pnl,
+    pnlRate:cost?(pnl/cost*100).toFixed(2):"0.00", fee
+  };
+}
+// 통합 행 예상이익 = 각 계좌 목표를 각자의 수수료로 계산해 합산한다(가중평균 수수료로 뭉개지 않음)
+function mergedGainHtml(code){
+  const won=n=>Math.round(n||0).toLocaleString("ko-KR");
+  const rows=(lastHoldings||[]).filter(h=>h.code===code);
+  let gain=0, cost=0, any=false;
+  rows.forEach(h=>{
+    const e=htEntry(h);
+    if(!e||!(e.v>0))return;
+    any=true;
+    const fee=acctFee(h.account), tax=isEtfName(h.name)?0:0.002;
+    const T=htTargetPrice(h,e), q=(e.qty>0?e.qty:h.qty);
+    gain+=(T*(1-fee-tax)-h.avg*(1+fee))*q;
+    cost+=h.avg*q*(1+fee);
+  });
+  if(!any)return '<span style="color:var(--muted)">-</span>';
+  const rate=cost?gain/cost*100:0;
+  return `<span class="${gain>=0?"up":"down"}">${gain>=0?"+":""}${won(gain)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</span>`;
+}
 function renderHoldings(hs){
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const tgt=(parseFloat($("hTarget").value)||0)/100;
@@ -1398,32 +1452,59 @@ function renderHoldings(hs){
   const sumEval=hs.reduce((s,h)=>s+evalAmtOf(h),0);
   const sumPnl=hs.reduce((s,h)=>s+(h.pnl||0),0);
   const ratio=(v,base)=>base?v/base*100:0;
-  const body=hs.map(h=>{
-    const fee=acctFee(h.account), etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
+  const dupes=mergedCodes(hs);
+
+  // 통합 행은 합계에 중복 반영되면 안 되므로, 집계는 실제 계좌 행(merged 아님)에서만 한다.
+  const row=h=>{
+    const fee=h.merged?h.fee:acctFee(h.account);
+    const etf=isEtfName(h.name), tax=etf?0:0.002, denom=1-fee-tax;
     const bep=h.avg*(1+fee)/denom, target=h.avg*(1+fee)*(1+tgt)/denom;
-    const cost=h.avg*h.qty; totCost+=cost; totEval+=evalAmtOf(h); totPnl+=(h.pnl||0); totTarget+=target*h.qty;
-    { const e=htEntry(h.code); if(e&&e.v>0){ const T=e.unit==="pct"?h.avg*(1+fee)*(1+(e.v||0)/100)/denom:e.v; totGain+=(T*(1-fee-tax)-h.avg*(1+fee))*(e.qty>0?e.qty:h.qty); } }
+    if(!h.merged){
+      const cost=h.avg*h.qty; totCost+=cost; totEval+=evalAmtOf(h); totPnl+=(h.pnl||0); totTarget+=target*h.qty;
+      const e=htEntry(h);
+      if(e&&e.v>0){ const T=htTargetPrice(h,e); totGain+=(T*(1-fee-tax)-h.avg*(1+fee))*(e.qty>0?e.qty:h.qty); }
+    }
     const up=(h.pnl||0)>=0;
     // 총손익이 0에 가까우면 기여도가 폭주해 숫자가 무의미해진다
     const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
-    return `<tr>
-      <td class="l"><span class="acct">${h.account}</span></td>
+    const k=h.merged?null:htKey(h), e=h.merged?null:htEntry(h);
+    // 통합 행은 계좌별로 파는 대상이 아니라 목표 입력칸을 두지 않는다(예상이익만 합산 표시)
+    const inputs=h.merged
+      ? `<td colspan="2" style="color:var(--muted);font-size:11px">계좌별 입력</td>
+         <td id="hgain_sum_${h.code}">${mergedGainHtml(h.code)}</td>`
+      : `<td style="white-space:nowrap"><input type="number" step="any" value="${e?.v??''}" onchange="setHtVal('${k}',this.value)" placeholder="목표" style="width:92px;padding:2px 4px"><select onchange="setHtUnit('${k}',this.value)" style="padding:2px 2px;margin-left:2px"><option value="price"${e?.unit!=="pct"?" selected":""}>가격</option><option value="pct"${e?.unit==="pct"?" selected":""}>%</option></select></td>
+         <td><input type="number" step="any" value="${e?.qty??''}" onchange="setHtQty('${k}',this.value)" placeholder="${h.qty}" style="width:62px;padding:2px 4px"></td>
+         <td id="hgain_${hcId(h)}">${holdGainHtml(h)}</td>`;
+    const acct=h.merged
+      ? `<span class="acct merged" title="${h.accounts.join(' + ')}">통합 ${h.account}</span>`
+      : `<span class="acct">${h.account}</span>`;
+    return `<tr class="${h.merged?'hrow-merged':''}">
+      <td class="l">${acct}</td>
       <td class="l"><span class="hold-link" onclick="analyzeHolding('${h.code}')" title="주식분석에서 조회">${h.name}</span><span style="color:var(--muted);font-size:10px"> ${h.code}</span></td>
       <td>${h.qty.toLocaleString()}</td>
       <td>${won(h.avg)}</td>
       <td>${won(bep)}</td>
       <td class="${h.price>=h.avg?"up":"down"}">${won(h.price)} <span style="font-size:11px">(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})</span></td>
-      <td>${won(h.evalAmt)}</td>
-      <td>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
+      <td>${won(evalAmtOf(h))}</td>
+      <td${h.merged?' style="color:var(--muted)"':''}>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
       <td class="${up?"up":"down"}">${up?"+":""}${won(h.pnl)}</td>
       <td class="${up?"up":"down"}">${up?"+":""}${h.pnlRate}%</td>
-      <td class="${up?"up":"down"}">${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
+      <td class="${up?"up":"down"}"${h.merged?' style="opacity:.75"':''}>${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
       <td style="color:var(--accent2)">${won(target)}</td>
-      <td style="white-space:nowrap"><input type="number" step="any" value="${htEntry(h.code)?.v??''}" onchange="setHtVal('${h.code}',this.value)" placeholder="목표" style="width:92px;padding:2px 4px"><select onchange="setHtUnit('${h.code}',this.value)" style="padding:2px 2px;margin-left:2px"><option value="price"${htEntry(h.code)?.unit!=="pct"?" selected":""}>가격</option><option value="pct"${htEntry(h.code)?.unit==="pct"?" selected":""}>%</option></select></td>
-      <td><input type="number" step="any" value="${htEntry(h.code)?.qty??''}" onchange="setHtQty('${h.code}',this.value)" placeholder="${h.qty}" style="width:62px;padding:2px 4px"></td>
-      <td id="hgain_${h.code}">${holdGainHtml(h)}</td>
+      ${inputs}
     </tr>`;
-  }).join("");
+  };
+
+  // 같은 종목끼리 묶어 계좌별 행들을 연달아 두고, 2개 이상이면 그 아래 통합 행을 붙인다
+  const seen=new Set(), body=[];
+  hs.forEach(h=>{
+    if(seen.has(h.code))return;
+    seen.add(h.code);
+    const rows=hs.filter(x=>x.code===h.code);
+    rows.forEach(r=>body.push(row(r)));
+    if(dupes.has(h.code))body.push(row(mergeHoldings(rows)));
+  });
+  const bodyHtml=body.join("");
   const tup=totPnl>=0;
   $("holdingsWrap").innerHTML=`<table class="htbl">
     <thead><tr>
@@ -1432,7 +1513,7 @@ function renderHoldings(hs){
       <th>목표가(+${$("hTarget").value}%)</th>
       <th>목표 입력</th><th>수량</th><th>예상이익</th>
     </tr></thead>
-    <tbody>${body}</tbody>
+    <tbody>${bodyHtml}</tbody>
     <tfoot><tr>
       <td class="l" colspan="4">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)}</span></td>
       <td></td>
@@ -1451,7 +1532,9 @@ function renderHoldings(hs){
   $("hNote").innerHTML=`<b>비중</b> 평가금액 기준 포트폴리오 점유율 · `
     +`<b>기여도</b> 총손익 ${tup?"+":""}${won(totPnl)}원 중 이 종목이 차지하는 비율`
     +`<br>기여도가 음수면 전체가 손실인데 이 종목은 이익이라는 뜻입니다.`
-    +`<br><b>목표 입력</b> 가격/% 택일 · <b>수량</b> 미입력 시 보유수량 전량 · <b>예상이익</b> 세금·왕복 수수료 반영 실현이익 (ETF 거래세 면제)`;
+    +`<br><b>목표 입력</b> 가격/% 택일 · <b>수량</b> 미입력 시 보유수량 전량 · <b>예상이익</b> 세금·왕복 수수료 반영 실현이익 (ETF 거래세 면제)`
+    +`<br><b>통합 행</b>(흐린 배경) 같은 종목을 2개 이상 계좌에 보유할 때 표시 · 평단은 가중평균, 수수료는 계좌별로 각각 반영`
+    +`<br>통합 행의 <b>비중·기여도</b>는 그 종목 전체 기준이라 계좌별 행과 더하면 중복됩니다. 아래 <b>합계</b>에는 통합 행이 포함되지 않습니다`;
 }
 
 /* ===== 목표 현금 만들기 ===== */
