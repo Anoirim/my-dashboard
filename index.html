@@ -139,6 +139,14 @@
     <span id="fileStatus" class="hint" style="margin:0">파일에 자동 저장하려면 연결하세요</span>
     <button class="ghost" onclick="backupData()">💾 백업</button>
     <label class="filebtn">📂 복원<input type="file" accept="application/json" onchange="restoreData(this)"></label>
+    <button class="ghost" onclick="toggleDashToken()" title="프록시 접근 토큰">🔑</button>
+  </div>
+
+  <!-- 프록시 접근 토큰: Vercel의 DASH_TOKEN과 같은 값을 넣어야 계좌 조회가 열린다 -->
+  <div class="backup-bar" id="dashTokenBox" style="display:none">
+    <input type="password" id="dashTokenInput" placeholder="접근 토큰 (Vercel DASH_TOKEN 값)" style="flex:1;min-width:200px">
+    <button onclick="setDashToken($('dashTokenInput').value)">저장</button>
+    <span id="dashTokenMsg" class="hint" style="margin:0"></span>
   </div>
 
   <div class="dept-tabs">
@@ -1020,6 +1028,33 @@ loadMonth(curMonth);
 
 /* ===== 공용: 원화 포맷 ===== */
 function won(n){return Math.round(n).toLocaleString("ko-KR")+"원";}
+
+/* ===== 공용: 프록시 호출 (공유 토큰 첨부) ===== */
+// /api/kis는 인증이 없으면 URL만 아는 누구나 잔고를 볼 수 있다.
+// Vercel에 DASH_TOKEN을 넣으면 프록시가 이 헤더를 요구하고, 안 넣으면 그대로 통과한다.
+const KIS_PROXY="/api/kis"; // Vercel 서버리스 프록시 (같은 도메인)
+let dashToken=localStorage.getItem("dashToken")||"";
+function setDashToken(v){
+  dashToken=(v||"").trim();
+  localStorage.setItem("dashToken",dashToken);
+  autoSaveFile();
+  $("dashTokenMsg").textContent=dashToken?"저장됨. 다시 불러오기를 눌러주세요.":"토큰을 비웠습니다.";
+}
+function toggleDashToken(){
+  const box=$("dashTokenBox"), open=box.style.display!=="none";
+  box.style.display=open?"none":"block";
+  if(!open){$("dashTokenInput").value=dashToken;$("dashTokenInput").focus();}
+}
+// 401이면 입력칸을 열어 토큰을 받는다. 호출부는 기존처럼 json만 받으면 된다.
+async function kisFetch(qs){
+  const r=await fetch(KIS_PROXY+qs,{headers:dashToken?{"x-dash-token":dashToken}:{}});
+  const j=await r.json().catch(()=>({error:"응답을 읽지 못했습니다."}));
+  if(r.status===401||j.needToken){
+    const box=$("dashTokenBox");
+    if(box){box.style.display="block";$("dashTokenMsg").textContent="접근 토큰이 필요합니다. Vercel에 넣은 DASH_TOKEN 값을 입력하세요.";}
+  }
+  return j;
+}
 // 보유종목을 손절재매수 select에 채운다. 같은 종목이 두 계좌에 있을 수 있어 값은 인덱스로 둔다.
 function fillSwStockOptions(){
   const sel=$("swStock");if(!sel)return;
@@ -1044,7 +1079,7 @@ async function fillSwPrice(ev){
   const btn=ev&&ev.target?ev.target:null;if(btn){btn.disabled=true;btn.textContent="조회중";}
   try{
     const code=lastHoldings[i].code;
-    const r=await fetch(KIS_PROXY+"?action=quote&symbol="+code).then(x=>x.json());
+    const r=await kisFetch("?action=quote&symbol="+code);
     if(r&&r.price){$("swSell").value=r.price;}
     else{out.style.display="block";out.innerHTML='<div class="easy-n">현재가를 받지 못했어요.</div>';}
   }catch(e){out.style.display="block";out.innerHTML='<div class="easy-n">현재가 조회 실패: '+e.message+'</div>';}
@@ -1095,9 +1130,8 @@ function calcSwitch(){
 
 /* ===== 주식 (국내 KIS / 해외 Finnhub) ===== */
 let chart=null;
-const KIS_PROXY="/api/kis"; // Vercel 서버리스 프록시 (같은 도메인)
 $("apiKey").value = localStorage.getItem("finnhubKey")||"";
-$("apiKey").addEventListener("change",e=>localStorage.setItem("finnhubKey",e.target.value.trim()));
+$("apiKey").addEventListener("change",e=>{localStorage.setItem("finnhubKey",e.target.value.trim());autoSaveFile();});
 $("ticker").addEventListener("keydown",e=>{if(e.key==="Enter")loadStock();});
 
 function onMarketChange(){
@@ -1129,7 +1163,7 @@ async function loadStockKR(silent){
   if(!silent)msg.textContent="불러오는 중...";
   try{
     // 실시간은 가벼운 quote, 수동 조회는 전체(이름+차트+재무)를 한 번에
-    const d=await fetch(KIS_PROXY+(silent?"?action=quote&symbol=":"?symbol=")+sym).then(r=>r.json());
+    const d=await kisFetch((silent?"?action=quote&symbol=":"?symbol=")+sym);
     if(d.error){msg.textContent="오류: "+d.error;return;}
     const up=d.diff>=0;
     const nm=(d.name&&d.name!==sym)?d.name:sym;
@@ -1229,7 +1263,7 @@ async function loadStockUS(silent){
   const msg=$("stockMsg");
   if(!key){msg.textContent="먼저 Finnhub API 키를 입력하세요.";return;}
   if(!sym){msg.textContent="종목 코드를 입력하세요.";return;}
-  localStorage.setItem("finnhubKey",key);
+  localStorage.setItem("finnhubKey",key); autoSaveFile();
   if(!silent)msg.textContent="불러오는 중...";
   try{
     // 현재가
@@ -1341,7 +1375,7 @@ async function loadHoldings(ev){
   const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
   const msg=$("hMsg");msg.textContent="불러오는 중...";
   try{
-    const r=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json());
+    const r=await kisFetch("?action=balance");
     if(r.error){msg.textContent="오류: "+r.error;return;}
     const hs=r.holdings||[];
     // 보유종목 조회와 잔고 조회가 같은 응답이라, 예수금까지 여기서 확보해 둔다
@@ -1684,9 +1718,9 @@ async function refreshToday(){
   if(autoBusy||tradesBusy)return; autoBusy=true;
   try{
     const today=new Date().toLocaleDateString("sv-SE").replace(/-/g,"");
-    const b=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json()).catch(()=>null);
+    const b=await kisFetch("?action=balance").catch(()=>null);
     await new Promise(s=>setTimeout(s,700)); // 계좌 조회 간격(초당 제한 회피)
-    const r=await fetch(KIS_PROXY+"?action=trades&from="+today+"&to="+today).then(x=>x.json()).catch(()=>null);
+    const r=await kisFetch("?action=trades&from="+today+"&to="+today).catch(()=>null);
     if(b&&!b.error){ lastBal=b; lastHoldings=b.holdings||lastHoldings; showHoldings(lastHoldings); }
     if(r&&!r.error){ const todays=r.trades||[]; lastTrades=lastTrades.filter(t=>String(pickTr(t,TR_F.date))!==today).concat(todays); }
     renderTrades(lastTrades);
@@ -1706,7 +1740,7 @@ async function refreshToday(){
 let realizedHist=JSON.parse(localStorage.getItem("realizedHist")||"{}");
 // 실현손익을 받아 realizedHist에 병합·보존한다. 조회는 내 계좌 현황의 불러오기/자동갱신에 통합한다.
 async function fetchRealizedRange(from,to){
-  const r=await fetch(KIS_PROXY+"?action=realized&from="+from+"&to="+to).then(x=>x.json()).catch(()=>null);
+  const r=await kisFetch("?action=realized&from="+from+"&to="+to).catch(()=>null);
   if(!r||r.error)return;
   (r.days||[]).forEach(d=>{
     const p=realizedHist[d.date]||{};
@@ -1779,9 +1813,9 @@ async function loadTrades(ev){
   try{
     const from=($("trFrom").value||"").replace(/-/g,""), to=($("trTo").value||"").replace(/-/g,"");
     // 동시 호출하면 KIS 초당 제한에 걸려 계좌 일부가 조용히 누락된다. 반드시 순차로 부른다.
-    const b=await fetch(KIS_PROXY+"?action=balance").then(x=>x.json()).catch(()=>null);
+    const b=await kisFetch("?action=balance").catch(()=>null);
     await new Promise(s=>setTimeout(s,700));
-    const r=await fetch(KIS_PROXY+"?action=trades&from="+from+"&to="+to).then(x=>x.json());
+    const r=await kisFetch("?action=trades&from="+from+"&to="+to);
     if(r.error){msg.textContent="오류: "+r.error;return;}
     lastTrades=r.trades||[];
     lastBal=(b&&!b.error)?b:null;
@@ -1820,8 +1854,9 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const invested=cfNet>0?cfNet:(buyAmt-sellAmt+cash-cfDiv);
   const asset=evalSum+cash;
   const pnl=asset-invested;
-  // 수익률 분모는 누적 입금액. 출금해도 분모가 줄지 않아 성과가 왜곡되지 않는다.
-  const rateBase=cfTotals().inn||invested;
+  // 수익률 분모는 투입 원금과 같은 기준(순투입 = 입금 - 출금)을 쓴다.
+  // 누적 입금액을 분모로 쓰면 원금을 인출했을 때 분자(총손익)와 기준이 어긋나 수익률이 축소된다.
+  const rateBase=invested;
   const rate=rateBase>0?(pnl/rateBase*100):0;
   if(invested>0)saveSnapshot(asset,invested); // 오늘 값은 재구성보다 정확하므로 추이용으로 남긴다
   // 총손익 = 평가손익 + 실현손익 + 배당. 성격이 달라 뭉치면 판단이 어려우므로 나눠 보인다.
@@ -2024,7 +2059,7 @@ function alignSeries(days,m){
 }
 async function loadIndexSeries(days,code){
   try{
-    const r=await fetch(KIS_PROXY+"?action=index&code="+(code||"0001")+"&from="+days[0]+"&to="+days[days.length-1]).then(x=>x.json());
+    const r=await kisFetch("?action=index&code="+(code||"0001")+"&from="+days[0]+"&to="+days[days.length-1]);
     const m={};(r.candles||[]).forEach(c=>{m[c.date]=c.close;});
     return alignSeries(days,m);
   }catch(e){return null;}
@@ -2034,8 +2069,8 @@ const MACRO={fx:{stat:"731Y001",item:"0000001"},jpy:{stat:"731Y001",item:"000000
 async function loadMacroSeries(days,kind){
   const c=MACRO[kind];
   try{
-    const r=await fetch(KIS_PROXY+"?action=macro&stat="+c.stat+"&item="+c.item
-      +"&from="+days[0]+"&to="+days[days.length-1]).then(x=>x.json());
+    const r=await kisFetch("?action=macro&stat="+c.stat+"&item="+c.item
+      +"&from="+days[0]+"&to="+days[days.length-1]);
     const m={};(r.series||[]).forEach(x=>{m[x.date]=x.value;});
     const s=alignSeries(days,m);
     if(s){s.unit=r.unit||"";s.name=r.name||"";}
@@ -2223,7 +2258,7 @@ async function loadEqNews(i){
   const from=shift(d,-1),to=shift(d,1),groups=[];
   for(const q of newsQueryFor(i)){
     try{
-      const r=await fetch(KIS_PROXY+"?action=news&q="+encodeURIComponent(q)+"&from="+from+"&to="+to+"&limit=6").then(x=>x.json());
+      const r=await kisFetch("?action=news&q="+encodeURIComponent(q)+"&from="+from+"&to="+to+"&limit=6");
       groups.push({q,items:r.items||[]});
     }catch(e){groups.push({q,items:[]});}
   }
@@ -2276,7 +2311,7 @@ async function loadEquity(){
     for(let i=0;i<codes.length;i++){ // 초당 제한 때문에 순차 조회
       msg.textContent=`시세 불러오는 중... (${i+1}/${codes.length})`;
       try{
-        const d=await fetch(KIS_PROXY+"?action=daily&symbol="+codes[i]+"&from="+from+"&to="+to).then(x=>x.json());
+        const d=await kisFetch("?action=daily&symbol="+codes[i]+"&from="+from+"&to="+to);
         px[codes[i]]={};(d.candles||[]).forEach(c=>{px[codes[i]][c.date]=c.close;});
       }catch(e){}
       await new Promise(s=>setTimeout(s,150));

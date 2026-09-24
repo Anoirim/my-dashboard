@@ -254,7 +254,9 @@ async function getFull(symbol) {
   if (p.error) return p;
   let name = p.name, candles = [];
   try { const dd = await getDaily(symbol); name = dd.name || name; candles = dd.candles; } catch (e) {}
-  const isEtf = p.per === 0 && p.pbr === 0;   // ETF는 PER·PBR이 0
+  // ETF는 PER·PBR이 0으로 온다. 값이 없으면 num()이 null을 주고 null===0은 false라
+  // 응답이 빠진 일반주가 ETF로 오분류되지는 않는다(느슨한 비교로 바꾸지 말 것).
+  const isEtf = p.per === 0 && p.pbr === 0;
   if (isEtf) {
     let nav = null, navRate = null;
     try { const e = await getEtf(symbol); nav = e.nav; navRate = e.navRate; } catch (err) {}
@@ -498,9 +500,25 @@ async function getRealized(from, to) {
   return { days, rawKeys: diag.rawKeys, raw1: diag.raw1, from, to, periods, errors: errors.length ? errors : null };
 }
 
+// 공유 토큰 검사. DASH_TOKEN 미설정이면 통과시켜, 환경변수를 넣기 전에도 대시보드가 동작한다.
+// 토큰은 헤더로만 받는다(쿼리스트링은 브라우저 히스토리·서버 로그에 남는다).
+function authFailed(req) {
+  const want = process.env.DASH_TOKEN || "";
+  if (!want) return false;
+  const got = String(req.headers["x-dash-token"] || "");
+  if (got.length !== want.length) return true;
+  let diff = 0; // 길이가 같을 때는 앞부분만 비교해 시간차가 새지 않도록 전체를 훑는다
+  for (let i = 0; i < want.length; i++) diff |= got.charCodeAt(i) ^ want.charCodeAt(i);
+  return diff !== 0;
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "x-dash-token");
+  if (req.method === "OPTIONS") return res.status(204).end();
   try {
+    if (authFailed(req))
+      return res.status(401).json({ error: "접근 토큰이 필요합니다.", needToken: true });
     if (!process.env.KIS_APPKEY || !process.env.KIS_APPSECRET)
       return res.status(500).json({ error: "환경변수(KIS_APPKEY/KIS_APPSECRET)가 설정되지 않았습니다." });
     const action = String(req.query.action || "price");
