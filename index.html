@@ -822,6 +822,7 @@ const esc=s=>s.replace(/</g,"&lt;");
 let expData=JSON.parse(localStorage.getItem("expData")||"{}");
 let curMonth=localStorage.getItem("curMonth")||new Date().toISOString().slice(0,7); // YYYY-MM
 let cards=[], fixed=[];
+let fxEditInc=true; // 정기지출 수정 시 체크 상태를 유지하기 위한 임시 보관
 
 // 기존(월 구분 없던) 데이터 이월
 if(!expData[curMonth] && (localStorage.getItem("cards")||localStorage.getItem("fixed"))){
@@ -842,7 +843,8 @@ function loadMonth(m){
     const prev=Object.keys(expData).filter(k=>k<m).sort().pop();
     if(prev){
       cards=expData[prev].cards.map(c=>({name:c.name,day:c.day,bill:0,inc:c.inc!==false}));
-      fixed=JSON.parse(JSON.stringify(expData[prev].fixed));
+      // 체크 해제는 그 달에만 적용되는 판단이므로, 새 달로 넘어올 때는 다시 포함으로 시작한다
+      fixed=JSON.parse(JSON.stringify(expData[prev].fixed)).map(f=>Object.assign(f,{inc:true}));
     }else{cards=[];fixed=[];}
     saveExpData();
   }
@@ -873,12 +875,16 @@ function addFixed(){
   const method=$("fxMethod").value||"계좌/현금";
   const cat=$("fxCat").value||"기타";
   if(!name||amt<=0)return;
-  fixed.push({name,amt,day,method,cat});
+  fixed.push({name,amt,day,method,cat,inc:fxEditInc});
+  fxEditInc=true; // 수정으로 들어온 체크 상태는 한 번만 이어받는다
   $("fxName").value="";$("fxAmt").value="";$("fxDay").value="";
   saveExpData();renderExpAll();
 }
-function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value=f.amt;$("fxDay").value=f.day||"";if(f.cat)$("fxCat").value=f.cat;buildMethodOptions(f.method);fixed.splice(i,1);saveExpData();renderExpAll();}
+function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value=f.amt;$("fxDay").value=f.day||"";if(f.cat)$("fxCat").value=f.cat;buildMethodOptions(f.method);fxEditInc=f.inc!==false;fixed.splice(i,1);saveExpData();renderExpAll();}
 function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
+// 체크를 끄면 그 달 합계·카드 정기분에서 빠진다. 값이 없는 기존 데이터는 포함으로 본다.
+const fxInc=f=>f.inc!==false;
+function toggleFixed(i){fixed[i].inc=!fxInc(fixed[i]);saveExpData();renderExpAll();}
 
 function buildMethodOptions(sel){
   const opts=["계좌/현금",...cards.map(c=>c.name)];
@@ -907,7 +913,7 @@ function carryFixedFromPrev(){
   if(!prev){alert("이월할 이전 달 정기지출이 없어요.");return;}
   let added=0;
   expData[prev].fixed.forEach(pf=>{
-    if(!fixed.some(f=>f.name===pf.name&&f.method===pf.method)){fixed.push(JSON.parse(JSON.stringify(pf)));added++;}
+    if(!fixed.some(f=>f.name===pf.name&&f.method===pf.method)){fixed.push(Object.assign(JSON.parse(JSON.stringify(pf)),{inc:true}));added++;}
   });
   (expData[prev].cards||[]).forEach(pc=>{
     if(!cards.some(c=>c.name===pc.name))cards.push({name:pc.name,day:pc.day,bill:0,inc:pc.inc!==false});
@@ -923,7 +929,7 @@ function renderExpAll(){
   // 카드 리스트 (왼쪽 체크박스로 계산 포함/제외, 정기 포함분·기타분 표시)
   $("cardList").innerHTML=cards.map((c,i)=>{
     const on=c.inc!==false;
-    const inc=fixed.filter(f=>f.method===c.name).reduce((s,f)=>s+f.amt,0);
+    const inc=fixed.filter(f=>fxInc(f)&&f.method===c.name).reduce((s,f)=>s+f.amt,0);
     const etc=c.bill-inc;
     return `<li class="sched-item" draggable="true" style="${on?'':'opacity:.5'}"
       ondragstart="dndStart('card',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('card',${i},this)" ondragend="dndEnd()">
@@ -939,8 +945,9 @@ function renderExpAll(){
 
   // 정기지출 리스트 (결제일 순 정렬)
   const order=[...fixed.keys()].sort((a,b)=>((fixed[a].day||99)-(fixed[b].day||99)));
-  $("fxList").innerHTML=order.map(i=>{const f=fixed[i];const isCard=f.method!=="계좌/현금";
-    return `<li class="sched-item">
+  $("fxList").innerHTML=order.map(i=>{const f=fixed[i];const isCard=f.method!=="계좌/현금";const on=fxInc(f);
+    return `<li class="sched-item" style="${on?'':'opacity:.5'}">
+      <input type="checkbox" ${on?'checked':''} onchange="toggleFixed(${i})" title="이 달 계산에 포함">
       <span class="time">${f.day?f.day+"일":"-"}</span>
       <span class="cat-tag">${esc(f.cat||"기타")}</span>
       <span class="txt">${esc(f.name)}</span>
@@ -956,13 +963,13 @@ function renderExpAll(){
   $("cardTotalTop").textContent=wonKR(cardTotal);
   const checkedNames=new Set(cards.filter(c=>c.inc!==false).map(c=>c.name));
   // 카드정기지출: 체크된 카드로 결제되는 정기지출
-  const cardFixed=fixed.filter(f=>checkedNames.has(f.method)).reduce((s,f)=>s+f.amt,0);
+  const cardFixed=fixed.filter(f=>fxInc(f)&&checkedNames.has(f.method)).reduce((s,f)=>s+f.amt,0);
   // 기타(카드 비정기): 체크된 카드 청구액 - 카드정기지출
   const cardEtc=cardTotal-cardFixed;
   // 카드외 정기지출
-  const nonCardFixed=fixed.filter(f=>f.method==="계좌/현금").reduce((s,f)=>s+f.amt,0);
-  // 정기지출 합계 = 모든 정기지출
-  const fixedTotal=fixed.reduce((s,f)=>s+f.amt,0);
+  const nonCardFixed=fixed.filter(f=>fxInc(f)&&f.method==="계좌/현금").reduce((s,f)=>s+f.amt,0);
+  // 정기지출 합계 = 체크된 정기지출만
+  const fixedTotal=fixed.filter(fxInc).reduce((s,f)=>s+f.amt,0);
   // 정기지출 섹션 상단: 합계 + 카드정기/카드외정기 세부
   $("fixedTotalTop").textContent=wonKR(fixedTotal);
   $("fixedBreakdown").textContent=`카드정기 ${wonKR(cardFixed)} · 카드외 정기 ${wonKR(nonCardFixed)}`;
@@ -981,8 +988,8 @@ function monthTotals(m){
   const d=expData[m]||{}, cards=d.cards||[], fixed=d.fixed||[];
   const cardTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>s+(c.bill||0),0);
   const names=new Set(cards.filter(c=>c.inc!==false).map(c=>c.name));
-  const cardFixed=fixed.filter(f=>names.has(f.method)).reduce((s,f)=>s+(f.amt||0),0);
-  const nonCardFixed=fixed.filter(f=>f.method==="계좌/현금").reduce((s,f)=>s+(f.amt||0),0);
+  const cardFixed=fixed.filter(f=>fxInc(f)&&names.has(f.method)).reduce((s,f)=>s+(f.amt||0),0);
+  const nonCardFixed=fixed.filter(f=>fxInc(f)&&f.method==="계좌/현금").reduce((s,f)=>s+(f.amt||0),0);
   return {card:cardTotal,fixed:cardFixed+nonCardFixed,etc:cardTotal-cardFixed,
     cardFixed,nonCardFixed,total:cardTotal+nonCardFixed};
 }
