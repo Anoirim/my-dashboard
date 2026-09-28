@@ -529,12 +529,22 @@ function backupData(){
   a.click();
 }
 // 저장 항목이 늘어날 때마다 복원 누락이 생기지 않도록 재적재를 한 곳에 모은다
+// 복원·파일읽기 후 메모리 상태를 다시 채운다.
+// 새 localStorage 항목을 추가하면 여기에도 반드시 넣어야 복원 직후 화면에 반영된다.
 function reloadAll(){
   expData=JSON.parse(localStorage.getItem("expData")||"{}");
   scheds=JSON.parse(localStorage.getItem("scheds")||"[]");
   cashFlows=JSON.parse(localStorage.getItem("cashFlows")||"[]");
   curMonth=localStorage.getItem("curMonth")||curMonth;
+  foods=JSON.parse(localStorage.getItem("foods")||"[]");
+  fdLog=JSON.parse(localStorage.getItem("fdLog")||"[]");
+  holdTargets=JSON.parse(localStorage.getItem("holdTargets")||"{}");
+  realizedHist=JSON.parse(localStorage.getItem("realizedHist")||"{}");
+  workOverrides=JSON.parse(localStorage.getItem("workOverrides")||"{}");
   renderScheds();renderEye();renderCashFlows();loadMonth(curMonth);
+  renderFoods();renderWork();
+  // 보유종목은 잔고를 다시 받아야 하므로, 이미 받아둔 값이 있을 때만 다시 그린다
+  if(typeof lastHoldings!=="undefined"&&lastHoldings.length)showHoldings(lastHoldings);
 }
 function restoreData(input){
   const f=input.files[0]; if(!f)return;
