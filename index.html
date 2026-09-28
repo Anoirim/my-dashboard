@@ -67,6 +67,9 @@
   .wk-hol{font-size:10px;color:var(--danger);font-weight:700;line-height:1.3;word-break:keep-all}
   /* 요일 규칙에서 벗어나게 직접 지정한 날 표시 */
   .wk-fix{color:var(--accent);font-style:normal;margin-left:3px;font-size:13px}
+  .wk-cell.editing{border-color:var(--accent);z-index:2}
+  .wk-sel{width:100%;padding:2px 4px;font-size:11px;border-radius:5px;
+    background:var(--card);border:1px solid var(--accent);color:var(--text)}
   .wk-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px}
   .wk-legend span.chip{font-size:11px;font-weight:700;border-radius:5px;padding:2px 7px}
   /* 시장 일정 */
@@ -2595,21 +2598,21 @@ function shiftOn(ymd,dow){
   if(o)return WORK_SHIFTS.find(s=>s.short===o)||null;
   return shiftByDow(dow);
 }
-// 클릭하면 근무처 → 다음 근무처 → 휴무 → 요일 기본값 순으로 돌아간다
-function cycleWork(ymd,dow){
-  const cur=workOverrides[ymd];
-  const order=[...WORK_SHIFTS.map(s=>s.short),"off"];
-  if(cur===undefined){
-    const base=shiftByDow(dow);
-    const i=base?order.indexOf(base.short):order.indexOf("off");
-    workOverrides[ymd]=order[(i+1)%order.length];
-  }else{
-    const i=order.indexOf(cur);
-    if(i===order.length-1)delete workOverrides[ymd]; // 한 바퀴 돌면 기본값 복귀
-    else workOverrides[ymd]=order[i+1];
-  }
+// 날짜를 누르면 그 칸에 드롭다운을 띄운다. 열려 있는 날짜(없으면 null)
+let wkEditing=null;
+function openWorkEdit(ymd,ev){
+  if(ev)ev.stopPropagation();
+  wkEditing=(wkEditing===ymd)?null:ymd;
+  renderWork();
+}
+function applyWorkEdit(ymd,val){
+  if(val==="")delete workOverrides[ymd]; // 요일 기본값으로 되돌리기
+  else workOverrides[ymd]=val;
+  wkEditing=null;
   saveWorkOverrides();renderWork();
 }
+// 바깥을 클릭하면 닫는다
+document.addEventListener("click",()=>{if(wkEditing!==null){wkEditing=null;renderWork();}});
 const tint=(hex,a)=>{const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;};
 let wkCur=new Date(); wkCur.setDate(1); // 보고 있는 달의 1일
 function wkMove(n){
@@ -2637,12 +2640,21 @@ function renderWork(){
     const s=shiftOn(ymd,dow), hol=HOLIDAYS[ymd], fixed=workOverrides[ymd]!==undefined;
     if(s)count[s.short]=(count[s.short]||0)+1;
     const red=dow===0||hol; // 일요일과 공휴일은 날짜를 붉게
-    html+=`<div class="wk-cell ${ymd===today?'today':''} ${red?'sun':''} ${hol?'hol':''}"
-      onclick="cycleWork('${ymd}',${dow})" title="클릭하면 근무처를 바꿉니다">
+    const cur=workOverrides[ymd]??"";
+    const editing=wkEditing===ymd;
+    const sel=`<select class="wk-sel" onclick="event.stopPropagation()"
+        onchange="applyWorkEdit('${ymd}',this.value)">
+        ${WORK_SHIFTS.map(x=>`<option value="${x.short}"${cur===x.short?" selected":""}>${x.short}</option>`).join("")}
+        <option value="off"${cur==="off"?" selected":""}>휴무</option>
+        <option value=""${cur===""?" selected":""}>기본(${(shiftByDow(dow)||{short:"휴무"}).short})</option>
+      </select>`;
+    html+=`<div class="wk-cell ${ymd===today?'today':''} ${red?'sun':''} ${hol?'hol':''} ${editing?'editing':''}"
+      onclick="openWorkEdit('${ymd}',event)" title="누르면 근무처를 고를 수 있습니다">
       <span class="d">${d}${fixed?'<i class="wk-fix" title="직접 지정한 날">•</i>':''}</span>
       ${hol?`<span class="wk-hol">${hol}</span>`:''}
-      ${s?`<span class="w" style="background:${tint(s.color,.18)};color:${s.color}">${s.short}</span>`
-         :`<span class="wk-off">휴무</span>`}
+      ${editing?sel
+        :(s?`<span class="w" style="background:${tint(s.color,.18)};color:${s.color}">${s.short}</span>`
+           :`<span class="wk-off">휴무</span>`)}
     </div>`;
   }
   $("wkGrid").innerHTML=html;
@@ -2653,7 +2665,7 @@ function renderWork(){
   const fixCnt=Object.keys(workOverrides).filter(k=>k.startsWith(`${y}-${String(m+1).padStart(2,"0")}`)).length;
   $("wkSummary").textContent=`${m+1}월 근무 ${workDays}일 (${parts.join(" · ")}) · 휴무 ${last.getDate()-workDays}일`
     +(holCnt?` · 공휴일 ${holCnt}일`:"")+(fixCnt?` · 직접 지정 ${fixCnt}일`:"")
-    +" · 날짜를 누르면 근무처를 바꿀 수 있습니다";
+    +" · 날짜를 누르면 근무처를 고를 수 있습니다";
 
   const now=new Date(), ts=shiftOn(today,now.getDay());
   $("wkToday").textContent="오늘 "+(ts?ts.name:"휴무")+(HOLIDAYS[today]?` · ${HOLIDAYS[today]}`:"");
