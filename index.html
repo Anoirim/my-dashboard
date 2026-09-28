@@ -2731,7 +2731,7 @@ const PICKUP_DEFAULT="16:20", PICKUP_LEAD=10; // 기본 시각, 몇 분 전에 �
 let pickupTime=localStorage.getItem("pickupTime")||PICKUP_DEFAULT;
 let pickupSkips=JSON.parse(localStorage.getItem("pickupSkips")||"[]"); // 하원 없는 날(YYYY-MM-DD)
 let pickupAlarm=localStorage.getItem("pickupAlarm")!=="off";
-let pkNotified=""; // 같은 날 중복 알림 방지
+let pkNotified=""; // "날짜|시각" — 시각을 바꾸면 키가 달라져 변경된 시각으로 다시 알린다
 function savePickup(){
   localStorage.setItem("pickupTime",pickupTime);
   localStorage.setItem("pickupSkips",JSON.stringify(pickupSkips));
@@ -2790,8 +2790,9 @@ function checkPickupAlarm(){
   const [hh,mm]=pickupTime.split(":").map(Number);
   const at=new Date(now); at.setHours(hh,mm,0,0);
   const left=Math.round((at-now)/60000);
-  if(left>PICKUP_LEAD||left<0||pkNotified===ymd)return;
-  pkNotified=ymd;
+  const key=ymd+"|"+pickupTime;
+  if(left>PICKUP_LEAD||left<0||pkNotified===key)return;
+  pkNotified=key;
   const msg=`${left}분 뒤 ${pickupTime} 하원입니다 (아이 2명)`;
   try{
     if(window.Notification&&Notification.permission==="granted")
