@@ -70,6 +70,17 @@
   .wk-cell.editing{border-color:var(--accent);z-index:2}
   .wk-sel{width:100%;padding:2px 4px;font-size:11px;border-radius:5px;
     background:var(--card);border:1px solid var(--accent);color:var(--text)}
+  /* 안약 달력: 근무 캘린더(.wk-*)를 재사용하고 링과 선택 패널만 따로 둔다 */
+  .eye-ring{width:26px;height:26px;border-radius:50%;margin:2px auto 0;
+    display:grid;place-items:center;font-size:10px;font-weight:800;color:var(--muted)}
+  .eye-ring i{width:17px;height:17px;border-radius:50%;background:var(--card);
+    display:grid;place-items:center;font-style:normal}
+  /* 0회는 조각이 하나도 없어 빈자리가 보이지 않으므로, 자리만 점선으로 남긴다 */
+  .eye-ring.zero{border:1px dashed var(--border);opacity:.5}
+  .wk-cell.picked{border-color:var(--accent2);border-width:2px}
+  .eye-panel{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px}
+  .eye-cols{display:flex;gap:18px;flex-wrap:wrap}
+  .eye-cols>div{flex:1;min-width:150px}
   .wk-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px}
   .wk-legend span.chip{font-size:11px;font-weight:700;border-radius:5px;padding:2px 7px}
   /* 시장 일정 */
@@ -220,23 +231,6 @@
       </div>
     </div>
 
-    <!-- 안약 복용 (타이머 바로 뒤) -->
-    <div class="card" data-dept="general">
-      <h2><span class="dot" style="background:#f5a623"></span>안약 복용 <span id="eyeCount" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
-      <div id="eyeDate" class="hint" style="margin-bottom:10px"></div>
-      <div style="display:flex;flex-direction:column;gap:14px">
-        <div>
-          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오전</div>
-          <ul class="sched-list" id="eyeAM" style="margin-top:0"></ul>
-        </div>
-        <div>
-          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오후</div>
-          <ul class="sched-list" id="eyePM" style="margin-top:0"></ul>
-        </div>
-      </div>
-      <button class="ghost" style="margin-top:14px;width:100%" onclick="resetEye()">오늘 기록 초기화</button>
-    </div>
-
     <!-- 하원 일정 (full 카드보다 앞에 둬야 같은 행에 놓인다) -->
     <div class="card" data-dept="general">
       <h2><span class="dot" style="background:#4f8cff"></span>하원 일정
@@ -259,6 +253,21 @@
         <button onclick="addSched()">추가</button>
       </div>
       <ul class="sched-list" id="schedList"></ul>
+    </div>
+
+    <!-- 안약 복용 (달력에서 날짜를 골라 그날 기록을 고친다) -->
+    <div class="card full" data-dept="general">
+      <h2><span class="dot" style="background:#f5a623"></span>안약 복용
+        <span id="eyeCount" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div class="row" style="margin-bottom:10px">
+        <button class="ghost" onclick="eyeMove(-1)">◀ 이전</button>
+        <b id="eyeTitle" style="min-width:110px;text-align:center"></b>
+        <button class="ghost" onclick="eyeMove(1)">다음 ▶</button>
+        <button class="ghost" onclick="eyeMove(0)">이번 달</button>
+      </div>
+      <div class="wk-grid" id="eyeGrid"></div>
+      <div class="eye-panel" id="eyePanel"></div>
+      <div class="hint" id="eyeNote" style="margin-top:10px"></div>
     </div>
 
     <!-- 식품 재고 -->
@@ -884,28 +893,86 @@ $("fdName").addEventListener("keydown",e=>{if(e.key==="Enter")addFood();});
 initFoodForm();
 renderFoods();
 
-/* ===== 안약 복용 (날짜별, 매일 자동 초기화) ===== */
+/* ===== 안약 복용 (날짜별 저장. 달력에서 날짜를 골라 과거도 고친다) =====
+   저장 키는 예전과 같은 eye_YYYY-MM-DD라 기존 기록이 그대로 달력에 나타난다. */
 const EYE_ITEMS=[
   {sec:"am",name:"코솝"},{sec:"am",name:"알파간"},
   {sec:"pm",name:"코솝"},{sec:"pm",name:"알파간"}
 ];
-function eyeKey(){return "eye_"+new Date().toLocaleDateString("sv-SE");} // YYYY-MM-DD
-function loadEye(){return JSON.parse(localStorage.getItem(eyeKey())||"[false,false,false,false]");}
-function saveEye(a){localStorage.setItem(eyeKey(),JSON.stringify(a));autoSaveFile();}
+const EYE_EMPTY=[false,false,false,false];
+function eyeToday(){return new Date().toLocaleDateString("sv-SE");}
+function eyeKey(ymd){return "eye_"+(ymd||eyeToday());}
+function loadEye(ymd){return JSON.parse(localStorage.getItem(eyeKey(ymd))||JSON.stringify(EYE_EMPTY));}
+function saveEye(a,ymd){localStorage.setItem(eyeKey(ymd),JSON.stringify(a));autoSaveFile();}
+function eyeDone(ymd){return loadEye(ymd).filter(Boolean).length;}
+
+let eyeCur=new Date(); eyeCur.setDate(1);   // 보고 있는 달
+let eyeSel=eyeToday();                      // 패널에서 편집 중인 날짜
+
+function eyeMove(n){
+  if(n===0)eyeCur=new Date();
+  else eyeCur=new Date(eyeCur.getFullYear(),eyeCur.getMonth()+n,1);
+  eyeCur.setDate(1);
+  renderEye();
+}
+// 미래 날짜는 기록할 것이 없으므로 고르지 못하게 한다
+function selectEyeDay(ymd){ if(ymd>eyeToday())return; eyeSel=ymd; renderEye(); }
+function toggleEye(i){const st=loadEye(eyeSel);st[i]=!st[i];saveEye(st,eyeSel);renderEye();}
+function resetEye(){saveEye(EYE_EMPTY.slice(),eyeSel);renderEye();}
+
+// 복용 수만큼 조각이 자라 원이 된다. 채우지 않은 부분은 비워 둔다.
+function eyeRing(n){
+  const pct=n/EYE_ITEMS.length*100;
+  const col=n===EYE_ITEMS.length?"var(--accent2)":"#f5a623";
+  return `<div class="eye-ring ${n?'':'zero'}" style="background:conic-gradient(${col} ${pct}%,transparent 0)">
+    <i>${n||""}</i></div>`;
+}
 function renderEye(){
-  const st=loadEye();
+  const y=eyeCur.getFullYear(), m=eyeCur.getMonth();
+  const today=eyeToday();
+  const first=new Date(y,m,1), last=new Date(y,m+1,0);
+  const wk=["일","월","화","수","목","금","토"];
+  $("eyeTitle").textContent=`${y}년 ${m+1}월`;
+
+  let html=wk.map((w,i)=>`<div class="wk-head ${i===0?'sun':i===6?'sat':''}">${w}</div>`).join("");
+  for(let i=0;i<first.getDay();i++)html+=`<div class="wk-cell empty"></div>`;
+  let done=0, tracked=0;
+  for(let d=1;d<=last.getDate();d++){
+    const ymd=new Date(y,m,d).toLocaleDateString("sv-SE");
+    const future=ymd>today, n=future?0:eyeDone(ymd);
+    if(!future){done+=n;tracked++;}
+    html+=`<div class="wk-cell ${ymd===today?'today':''} ${ymd===eyeSel?'picked':''} ${future?'empty':''}"
+      ${future?'':`onclick="selectEyeDay('${ymd}')" title="누르면 이 날 기록을 고칠 수 있습니다"`}>
+      <span class="d">${d}</span>
+      ${future?'':eyeRing(n)}
+    </div>`;
+  }
+  $("eyeGrid").innerHTML=html;
+
+  const max=tracked*EYE_ITEMS.length;
+  $("eyeCount").textContent=max?`이달 ${done} / ${max}회 (${Math.round(done/max*100)}%)`:"";
+
+  // 선택한 날짜의 체크 패널
+  const st=loadEye(eyeSel), sd=new Date(eyeSel+"T00:00:00");
   const rows=(sec)=>EYE_ITEMS.map((it,i)=>it.sec===sec?`
     <li class="sched-item ${st[i]?'done':''}">
       <input type="checkbox" ${st[i]?'checked':''} onchange="toggleEye(${i})">
       <span class="txt">${it.name}</span>
     </li>`:"").join("");
-  $("eyeAM").innerHTML=rows("am");
-  $("eyePM").innerHTML=rows("pm");
-  $("eyeCount").textContent=st.filter(Boolean).length+" / 4 완료";
-  $("eyeDate").textContent=new Date().toLocaleDateString("ko-KR")+" 기준";
+  $("eyePanel").innerHTML=`
+    <div class="row" style="margin-bottom:10px">
+      <b>${sd.toLocaleDateString("ko-KR")} (${wk[sd.getDay()]})${eyeSel===today?" · 오늘":""}</b>
+      <span class="hint" style="margin:0 auto 0 8px">${st.filter(Boolean).length} / ${EYE_ITEMS.length} 완료</span>
+      <button class="ghost" onclick="resetEye()">이 날 기록 초기화</button>
+    </div>
+    <div class="eye-cols">
+      <div><div style="font-size:13px;color:var(--muted);margin-bottom:6px">오전</div>
+        <ul class="sched-list" style="margin-top:0">${rows("am")}</ul></div>
+      <div><div style="font-size:13px;color:var(--muted);margin-bottom:6px">오후</div>
+        <ul class="sched-list" style="margin-top:0">${rows("pm")}</ul></div>
+    </div>`;
+  $("eyeNote").textContent="날짜를 누르면 그 날 기록을 고칠 수 있습니다. 링이 꽉 차면 그날 4회를 모두 넣은 것입니다.";
 }
-function toggleEye(i){const st=loadEye();st[i]=!st[i];saveEye(st);renderEye();}
-function resetEye(){saveEye([false,false,false,false]);renderEye();}
 renderEye();
 
 /* ===== 월 지출 관리 (월별 저장 + 년/월 조회 + 계산포함 체크) ===== */
