@@ -196,7 +196,6 @@
     <button class="dept-tab" data-tab="research" onclick="switchDept('research')">투자연구소</button>
     <button class="dept-tab" data-tab="mgmt" onclick="switchDept('mgmt')">관리부</button>
     <button class="dept-tab" data-tab="general" onclick="switchDept('general')">총무부</button>
-    <button class="dept-tab" data-tab="health" onclick="switchDept('health')">보건실</button>
   </div>
 
   <div class="grid">
@@ -221,18 +220,24 @@
       </div>
     </div>
 
-    <!-- 스케줄러 -->
+    <!-- 안약 복용 (타이머 바로 뒤) -->
     <div class="card" data-dept="general">
-      <h2><span class="dot" style="background:var(--accent2)"></span>스케줄러</h2>
-      <div class="row">
-        <input type="time" id="schedTime" style="width:120px">
-        <input type="text" id="schedText" placeholder="할 일 입력" style="flex:1">
-        <button onclick="addSched()">추가</button>
+      <h2><span class="dot" style="background:#f5a623"></span>안약 복용 <span id="eyeCount" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div id="eyeDate" class="hint" style="margin-bottom:10px"></div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오전</div>
+          <ul class="sched-list" id="eyeAM" style="margin-top:0"></ul>
+        </div>
+        <div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오후</div>
+          <ul class="sched-list" id="eyePM" style="margin-top:0"></ul>
+        </div>
       </div>
-      <ul class="sched-list" id="schedList"></ul>
+      <button class="ghost" style="margin-top:14px;width:100%" onclick="resetEye()">오늘 기록 초기화</button>
     </div>
 
-    <!-- 하원 일정 (타이머·스케줄러와 같은 행에 놓이도록 full 카드보다 앞에 둔다) -->
+    <!-- 하원 일정 (full 카드보다 앞에 둬야 같은 행에 놓인다) -->
     <div class="card" data-dept="general">
       <h2><span class="dot" style="background:#4f8cff"></span>하원 일정
         <span id="pkState" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
@@ -243,6 +248,17 @@
         <button class="ghost" id="pkAlarmBtn" onclick="togglePickupAlarm()"></button>
       </div>
       <div class="hint" id="pkNote"></div>
+    </div>
+
+    <!-- 스케줄러 -->
+    <div class="card" data-dept="general">
+      <h2><span class="dot" style="background:var(--accent2)"></span>스케줄러</h2>
+      <div class="row">
+        <input type="time" id="schedTime" style="width:120px">
+        <input type="text" id="schedText" placeholder="할 일 입력" style="flex:1">
+        <button onclick="addSched()">추가</button>
+      </div>
+      <ul class="sched-list" id="schedList"></ul>
     </div>
 
     <!-- 식품 재고 -->
@@ -280,23 +296,6 @@
       <div class="wk-legend" id="wkLegend"></div>
       <div class="wk-grid" id="wkGrid"></div>
       <div class="hint" id="wkSummary" style="margin-top:10px"></div>
-    </div>
-
-    <!-- 안약 스케줄러 -->
-    <div class="card" data-dept="health">
-      <h2><span class="dot" style="background:#f5a623"></span>안약 복용 <span id="eyeCount" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
-      <div id="eyeDate" class="hint" style="margin-bottom:10px"></div>
-      <div style="display:flex;flex-direction:column;gap:14px">
-        <div>
-          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오전</div>
-          <ul class="sched-list" id="eyeAM" style="margin-top:0"></ul>
-        </div>
-        <div>
-          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">오후</div>
-          <ul class="sched-list" id="eyePM" style="margin-top:0"></ul>
-        </div>
-      </div>
-      <button class="ghost" style="margin-top:14px;width:100%" onclick="resetEye()">오늘 기록 초기화</button>
     </div>
 
     <!-- 시장 일정 -->
@@ -2890,6 +2889,8 @@ renderMarketCal();
 /* ===== 부서 탭 ===== */
 let curDept="fin";
 function switchDept(d){
+  // 보건실은 총무부로 흡수됐다. 예전 값이 남아 있거나 백업으로 되돌아와도 빈 화면이 되지 않게 돌린다
+  if(d==="health")d="general";
   curDept=d;
   localStorage.setItem("curDept",d);
   document.querySelectorAll("[data-dept]").forEach(c=>{c.style.display=c.dataset.dept===d?"":"none";});
