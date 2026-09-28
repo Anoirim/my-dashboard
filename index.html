@@ -43,6 +43,19 @@
   .sched-item .time{color:var(--accent);font-size:12px;font-weight:600;min-width:44px}
   .sched-item .txt{flex:1;font-size:14px}
   .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
+  /* 시장 일정 */
+  .mk-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;
+    padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .mk-item.soon{border-color:#f5a623}
+  .mk-item.today{border-color:var(--danger);background:rgba(255,92,114,.1)}
+  .mk-item .dt{font-size:12px;color:var(--muted);min-width:96px}
+  .mk-item .nm{font-size:14px;font-weight:600}
+  .mk-item .dd{font-size:12px;font-weight:700;margin-left:auto;min-width:54px;text-align:right}
+  .mk-item .dd.soon{color:#f5a623}
+  .mk-item .dd.today{color:var(--danger)}
+  .mk-item .why{flex-basis:100%;font-size:12px;color:var(--muted);line-height:1.6}
+  .mk-tag{font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;
+    background:rgba(79,140,255,.15);color:var(--accent);white-space:nowrap}
   /* 보유종목: 종목명만 눌러야 주식분석으로 넘어간다(입력칸 오클릭 방지) */
   .hold-link{cursor:pointer;border-bottom:1px dotted var(--muted)}
   .hold-link:hover{color:var(--accent);border-bottom-color:var(--accent)}
@@ -227,6 +240,16 @@
         </div>
       </div>
       <button class="ghost" style="margin-top:14px;width:100%" onclick="resetEye()">오늘 기록 초기화</button>
+    </div>
+
+    <!-- 시장 일정 -->
+    <div class="card full" data-dept="research">
+      <h2><span class="dot" style="background:#4f8cff"></span>시장 일정
+        <span id="mkNext" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div id="mkList"></div>
+      <div class="hint" style="margin-top:10px">
+        날짜는 공개된 규칙으로 계산합니다. 변동성이 커지는 날을 미리 알아두는 용도이며, 매매 판단은 직접 하세요.
+      </div>
     </div>
 
     <!-- 손절 후 재매수 계산 -->
@@ -2482,6 +2505,90 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx,jpy){
         x:{ticks:{color:"#8b97ad",maxTicksLimit:10},grid:{display:false}}}}
   });
 }
+
+/* ===== 시장 일정 =====
+   날짜 규칙은 공개된 제도를 그대로 계산한다. 근거:
+   - 코스피200 선물: 결제월 3·6·9·12월, 최종거래일은 각 결제월 두 번째 목요일(공휴일이면 순차적으로 앞당김)
+   - 코스피200 옵션: 매월 결제, 최종거래일은 각 결제월 두 번째 목요일(같은 규칙)
+     → 3·6·9·12월 둘째 목요일은 선물·옵션이 함께 끝나는 동시만기일
+     출처: krx.co.kr 코스피200 선물/옵션 상품명세
+   - 분기·반기보고서 제출기한: 분기 종료 후 45일 이내 (자본시장법 제160조)
+   - 사업보고서 제출기한: 사업연도 종료 후 90일 이내 (자본시장법 제159조). 4분기는 분기보고서를 내지 않는다
+   - FOMC: federalreserve.gov 공식 캘린더에서 옮겨 적은 확정 일정(각 회의는 직전 회의에서 재확인되는 잠정 일정)
+   휴장일 데이터는 없으므로 "공휴일이면 앞당김"은 자동 반영되지 않는다. 안내 문구로 알린다. */
+const FOMC_DATES=[ // 회의 둘째 날(정책 발표일) 기준
+  "2026-01-28","2026-03-18","2026-04-29","2026-06-17",
+  "2026-07-29","2026-09-16","2026-10-28","2026-12-09",
+  "2027-01-27","2027-03-17","2027-04-28","2027-06-09",
+  "2027-07-28","2027-09-15","2027-10-27","2027-12-08"
+];
+const mkYmd=d=>d.toLocaleDateString("sv-SE");
+// 해당 월의 N번째 특정 요일(0=일). 둘째 목요일이면 nth=2, dow=4
+function nthDow(year,month,nth,dow){
+  const d=new Date(year,month,1);
+  const shift=(dow-d.getDay()+7)%7;
+  d.setDate(1+shift+(nth-1)*7);
+  return d;
+}
+function marketEvents(fromYmd,months){
+  const base=new Date(fromYmd+"T00:00:00"), out=[];
+  for(let i=0;i<months;i++){
+    const y=base.getFullYear(), m=base.getMonth()+i;
+    const th2=nthDow(y,m,2,4); // 둘째 목요일
+    const mm=th2.getMonth()+1;
+    const quad=[3,6,9,12].includes(mm);
+    out.push({
+      date:mkYmd(th2),
+      name:quad?"선물·옵션 동시만기":"옵션 만기",
+      tag:quad?"동시만기":"만기",
+      why:quad
+        ?"선물과 옵션이 같은 날 끝나 청산 물량이 몰립니다. 지수가 장 막판에 크게 흔들리는 날로 알려져 있습니다."
+        :"옵션만 만기입니다. 동시만기보다는 영향이 작은 편입니다."
+    });
+    // 보고서 법정 제출기한. 1·2·3분기는 분기·반기보고서(분기말 +45일),
+    // 4분기는 분기보고서를 내지 않고 사업연도 종료 후 90일 이내 사업보고서를 낸다.
+    if([3,6,9,12].includes(mm)){
+      const q=new Date(y,m+1,0); // 분기말
+      const annual=mm===12;
+      const due=new Date(q); due.setDate(due.getDate()+(annual?90:45));
+      out.push({
+        date:mkYmd(due),
+        name:(annual?"사업보고서":"분기·반기보고서")+" 제출기한",
+        tag:"실적",
+        why:annual
+          ?"한 해 실적을 확정해 내는 기한입니다(사업연도 종료 후 90일). 이 무렵 배당액도 함께 확정됩니다."
+          :"법정 기한입니다(분기 종료 후 45일). 이 앞뒤로 실적 발표가 몰려 개별 종목 변동성이 커집니다."
+      });
+    }
+  }
+  FOMC_DATES.forEach(d=>out.push({
+    date:d, name:"미국 FOMC 결과 발표", tag:"금리",
+    why:"미국 기준금리를 정하는 회의입니다. 한국 시간 새벽에 발표돼 당일 우리 증시가 먼저 반응합니다."
+  }));
+  const end=new Date(base); end.setMonth(end.getMonth()+months);
+  return out.filter(e=>e.date>=fromYmd&&e.date<mkYmd(end)).sort((a,b)=>a.date.localeCompare(b.date));
+}
+function renderMarketCal(){
+  const today=mkYmd(new Date());
+  const evs=marketEvents(today,4).slice(0,12);
+  const dday=d=>Math.round((new Date(d+"T00:00:00")-new Date(today+"T00:00:00"))/86400000);
+  const wk=["일","월","화","수","목","금","토"];
+  $("mkList").innerHTML=evs.map(e=>{
+    const n=dday(e.date), cls=n===0?"today":(n<=7?"soon":"");
+    const label=n===0?"오늘":"D-"+n;
+    const dt=new Date(e.date+"T00:00:00");
+    return `<div class="mk-item ${cls}">
+      <span class="dt">${e.date.slice(5).replace("-","/")} (${wk[dt.getDay()]})</span>
+      <span class="mk-tag">${e.tag}</span>
+      <span class="nm">${e.name}</span>
+      <span class="dd ${cls}">${label}</span>
+      <span class="why">${e.why}</span>
+    </div>`;
+  }).join("")||'<div class="hint">표시할 일정이 없습니다.</div>';
+  const next=evs[0];
+  $("mkNext").textContent=next?`다음: ${next.name} (${dday(next.date)===0?"오늘":"D-"+dday(next.date)})`:"";
+}
+renderMarketCal();
 
 /* ===== 부서 탭 ===== */
 let curDept="fin";
