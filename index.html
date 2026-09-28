@@ -232,6 +232,19 @@
       <ul class="sched-list" id="schedList"></ul>
     </div>
 
+    <!-- 하원 일정 (타이머·스케줄러와 같은 행에 놓이도록 full 카드보다 앞에 둔다) -->
+    <div class="card" data-dept="general">
+      <h2><span class="dot" style="background:#4f8cff"></span>하원 일정
+        <span id="pkState" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div id="pkToday" style="font-size:15px;font-weight:600;margin-bottom:8px"></div>
+      <div class="row" style="margin-bottom:10px">
+        <input type="time" id="pkTime" style="width:120px" onchange="setPickupTime(this.value)">
+        <button class="ghost" id="pkSkipBtn" onclick="togglePickupSkip()"></button>
+        <button class="ghost" id="pkAlarmBtn" onclick="togglePickupAlarm()"></button>
+      </div>
+      <div class="hint" id="pkNote"></div>
+    </div>
+
     <!-- 식품 재고 -->
     <div class="card full" data-dept="general">
       <h2><span class="dot" style="background:#f5a623"></span>식품 재고
@@ -267,19 +280,6 @@
       <div class="wk-legend" id="wkLegend"></div>
       <div class="wk-grid" id="wkGrid"></div>
       <div class="hint" id="wkSummary" style="margin-top:10px"></div>
-    </div>
-
-    <!-- 하원 일정 -->
-    <div class="card" data-dept="general">
-      <h2><span class="dot" style="background:#4f8cff"></span>하원 일정
-        <span id="pkState" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
-      <div id="pkToday" style="font-size:15px;font-weight:600;margin-bottom:8px"></div>
-      <div class="row" style="margin-bottom:10px">
-        <input type="time" id="pkTime" style="width:120px" onchange="setPickupTime(this.value)">
-        <button class="ghost" id="pkSkipBtn" onclick="togglePickupSkip()"></button>
-        <button class="ghost" id="pkAlarmBtn" onclick="togglePickupAlarm()"></button>
-      </div>
-      <div class="hint" id="pkNote"></div>
     </div>
 
     <!-- 안약 스케줄러 -->
