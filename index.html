@@ -2591,7 +2591,12 @@ const HOLIDAYS={
   "2027-10-09":"한글날","2027-10-11":"대체공휴일",
   "2027-12-25":"성탄절","2027-12-27":"대체공휴일"
 };
-// 요일 규칙에서 벗어난 날만 저장한다. {"2026-09-30":"off"} 또는 근무처 이름
+// 요일 규칙에서 벗어난 날만 저장한다.
+// 값: 근무처 이름 | "off"(그냥 쉬는 날) | "leave"(연차)
+// 기본 휴무(화·일)는 지정이 없는 상태라 저장하지 않는다 — 연차와 구분하려는 목적
+// 기본 휴무(요일 규칙)는 흐린 빨강, 직접 지정한 휴무는 또렷한 빨강, 연차는 보라로 구분한다
+const REST_KINDS={off:{label:"휴무",color:"var(--danger)",bg:"rgba(255,92,114,.16)"},
+                  leave:{label:"연차",color:"#c77dff",bg:"rgba(199,125,255,.18)"}};
 let workOverrides=JSON.parse(localStorage.getItem("workOverrides")||"{}");
 function saveWorkOverrides(){localStorage.setItem("workOverrides",JSON.stringify(workOverrides));autoSaveFile();}
 // 0=일 … 6=토. 어느 근무에도 없으면 휴무
@@ -2599,9 +2604,15 @@ const shiftByDow=dow=>WORK_SHIFTS.find(s=>s.days.includes(dow))||null;
 // 수동 지정이 있으면 그것이 우선한다
 function shiftOn(ymd,dow){
   const o=workOverrides[ymd];
-  if(o==="off")return null;
+  if(o&&REST_KINDS[o])return null; // off·leave는 쉬는 날
   if(o)return WORK_SHIFTS.find(s=>s.short===o)||null;
   return shiftByDow(dow);
+}
+// 쉬는 날의 종류를 돌려준다. 지정이 없으면 요일 규칙상 기본 휴무다.
+function restKind(ymd,dow){
+  const o=workOverrides[ymd];
+  if(o&&REST_KINDS[o])return o;
+  return shiftByDow(dow)?null:"base";
 }
 // 날짜를 누르면 그 칸에 드롭다운을 띄운다. 열려 있는 날짜(없으면 null)
 let wkEditing=null;
@@ -2639,18 +2650,20 @@ function renderWork(){
 
   let html=wk.map((w,i)=>`<div class="wk-head ${i===0?'sun':i===6?'sat':''}">${w}</div>`).join("");
   for(let i=0;i<first.getDay();i++)html+=`<div class="wk-cell empty"></div>`; // 1일 앞 빈칸
-  const count={};
+  const count={}, rest={};
   for(let d=1;d<=last.getDate();d++){
     const dt=new Date(y,m,d), dow=dt.getDay(), ymd=dt.toLocaleDateString("sv-SE");
     const s=shiftOn(ymd,dow), hol=HOLIDAYS[ymd], fixed=workOverrides[ymd]!==undefined;
     if(s)count[s.short]=(count[s.short]||0)+1;
+    else{const k=restKind(ymd,dow); rest[k]=(rest[k]||0)+1;}
     const red=dow===0||hol; // 일요일과 공휴일은 날짜를 붉게
     const cur=workOverrides[ymd]??"";
     const editing=wkEditing===ymd;
     const sel=`<select class="wk-sel" onclick="event.stopPropagation()"
         onchange="applyWorkEdit('${ymd}',this.value)">
         ${WORK_SHIFTS.map(x=>`<option value="${x.short}"${cur===x.short?" selected":""}>${x.short}</option>`).join("")}
-        <option value="off"${cur==="off"?" selected":""}>휴무</option>
+        ${Object.entries(REST_KINDS).map(([k,v])=>
+          `<option value="${k}"${cur===k?" selected":""}>${v.label}</option>`).join("")}
         <option value=""${cur===""?" selected":""}>기본(${(shiftByDow(dow)||{short:"휴무"}).short})</option>
       </select>`;
     html+=`<div class="wk-cell ${ymd===today?'today':''} ${red?'sun':''} ${hol?'hol':''} ${editing?'editing':''}"
@@ -2659,7 +2672,11 @@ function renderWork(){
       ${hol?`<span class="wk-hol">${hol}</span>`:''}
       ${editing?sel
         :(s?`<span class="w" style="background:${tint(s.color,.18)};color:${s.color}">${s.short}</span>`
-           :`<span class="wk-off">휴무</span>`)}
+           :(()=>{const k=restKind(ymd,dow);
+              if(k==="base")return `<span class="wk-off">휴무</span>`;
+              const v=REST_KINDS[k];
+              return `<span class="w" style="background:${v.bg};color:${v.color}">${v.label}</span>`;
+            })())}
     </div>`;
   }
   $("wkGrid").innerHTML=html;
@@ -2668,12 +2685,16 @@ function renderWork(){
   const workDays=Object.values(count).reduce((a,b)=>a+b,0);
   const holCnt=Object.keys(HOLIDAYS).filter(k=>k.startsWith(`${y}-${String(m+1).padStart(2,"0")}`)).length;
   const fixCnt=Object.keys(workOverrides).filter(k=>k.startsWith(`${y}-${String(m+1).padStart(2,"0")}`)).length;
-  $("wkSummary").textContent=`${m+1}월 근무 ${workDays}일 (${parts.join(" · ")}) · 휴무 ${last.getDate()-workDays}일`
+  const restTxt=[`휴무 ${(rest.base||0)+(rest.off||0)}일`]
+    .concat(rest.leave?[`연차 ${rest.leave}일`]:[]).join(" · ");
+  $("wkSummary").textContent=`${m+1}월 근무 ${workDays}일 (${parts.join(" · ")}) · ${restTxt}`
     +(holCnt?` · 공휴일 ${holCnt}일`:"")+(fixCnt?` · 직접 지정 ${fixCnt}일`:"")
     +" · 날짜를 누르면 근무처를 고를 수 있습니다";
 
   const now=new Date(), ts=shiftOn(today,now.getDay());
-  $("wkToday").textContent="오늘 "+(ts?ts.name:"휴무")+(HOLIDAYS[today]?` · ${HOLIDAYS[today]}`:"");
+  const tk=ts?null:restKind(today,now.getDay());
+  $("wkToday").textContent="오늘 "+(ts?ts.name:(tk==="base"?"휴무":REST_KINDS[tk].label))
+    +(HOLIDAYS[today]?` · ${HOLIDAYS[today]}`:"");
 }
 renderWork();
 
