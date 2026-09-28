@@ -43,6 +43,20 @@
   .sched-item .time{color:var(--accent);font-size:12px;font-weight:600;min-width:44px}
   .sched-item .txt{flex:1;font-size:14px}
   .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
+  /* 근무 일정 달력 */
+  .wk-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+  .wk-head{text-align:center;font-size:12px;font-weight:700;color:var(--muted);padding:6px 0}
+  .wk-head.sun{color:var(--danger)} .wk-head.sat{color:var(--accent)}
+  .wk-cell{min-height:58px;border:1px solid var(--border);border-radius:8px;padding:5px 6px;
+    background:var(--card2);display:flex;flex-direction:column;gap:3px}
+  .wk-cell.empty{background:transparent;border-color:transparent}
+  .wk-cell.today{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .wk-cell .d{font-size:12px;color:var(--muted);font-weight:600}
+  .wk-cell.today .d{color:var(--accent)}
+  .wk-cell .w{font-size:11px;font-weight:700;border-radius:5px;padding:2px 4px;line-height:1.35;word-break:keep-all}
+  .wk-off{color:var(--muted);font-size:11px}
+  .wk-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px}
+  .wk-legend span.chip{font-size:11px;font-weight:700;border-radius:5px;padding:2px 7px}
   /* 시장 일정 */
   .mk-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;
     padding:10px 12px;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -223,6 +237,21 @@
         <summary id="fdStockSum">비축 (실온)</summary>
         <div id="fdStockList"></div>
       </details>
+    </div>
+
+    <!-- 근무 일정 -->
+    <div class="card full" data-dept="general">
+      <h2><span class="dot" style="background:#c77dff"></span>근무 일정
+        <span id="wkToday" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div class="row" style="margin-bottom:10px">
+        <button class="ghost" onclick="wkMove(-1)">◀ 이전</button>
+        <b id="wkTitle" style="min-width:110px;text-align:center"></b>
+        <button class="ghost" onclick="wkMove(1)">다음 ▶</button>
+        <button class="ghost" onclick="wkMove(0)">이번 달</button>
+      </div>
+      <div class="wk-legend" id="wkLegend"></div>
+      <div class="wk-grid" id="wkGrid"></div>
+      <div class="hint" id="wkSummary" style="margin-top:10px"></div>
     </div>
 
     <!-- 안약 스케줄러 -->
@@ -2505,6 +2534,57 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx,jpy){
         x:{ticks:{color:"#8b97ad",maxTicksLimit:10},grid:{display:false}}}}
   });
 }
+
+/* ===== 근무 일정 (요일 고정 근무표) =====
+   요일만 정해져 있어 날짜 계산으로 한 달치를 그대로 만든다. 저장할 상태가 없다.
+   근무처가 바뀌면 WORK_SHIFTS의 요일 배열만 고치면 된다. */
+const WORK_SHIFTS=[
+  {name:"하이웨이마트 오목천점", short:"하이웨이", days:[1,4,5], color:"#33d69f"}, // 월·목·금
+  {name:"롯데마트 권선점",      short:"롯데마트", color:"#f5a623", days:[3,6]}     // 수·토
+];
+// 0=일 … 6=토. 어느 근무에도 없으면 휴무
+const shiftOf=dow=>WORK_SHIFTS.find(s=>s.days.includes(dow))||null;
+const tint=(hex,a)=>{const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;};
+let wkCur=new Date(); wkCur.setDate(1); // 보고 있는 달의 1일
+function wkMove(n){
+  if(n===0){wkCur=new Date();wkCur.setDate(1);}
+  else wkCur.setMonth(wkCur.getMonth()+n);
+  renderWork();
+}
+function renderWork(){
+  const y=wkCur.getFullYear(), m=wkCur.getMonth();
+  const today=new Date().toLocaleDateString("sv-SE");
+  const first=new Date(y,m,1), last=new Date(y,m+1,0);
+  const wk=["일","월","화","수","목","금","토"];
+  $("wkTitle").textContent=`${y}년 ${m+1}월`;
+
+  $("wkLegend").innerHTML=WORK_SHIFTS.map(s=>
+    `<span class="chip" style="background:${tint(s.color,.18)};color:${s.color}">${s.short}</span>`
+    +`<span style="color:var(--muted)">${s.name} · ${s.days.map(d=>wk[d]).join("·")}</span>`
+  ).join("")+`<span class="wk-off">그 외 휴무</span>`;
+
+  let html=wk.map((w,i)=>`<div class="wk-head ${i===0?'sun':i===6?'sat':''}">${w}</div>`).join("");
+  for(let i=0;i<first.getDay();i++)html+=`<div class="wk-cell empty"></div>`; // 1일 앞 빈칸
+  const count={};
+  for(let d=1;d<=last.getDate();d++){
+    const dt=new Date(y,m,d), ymd=dt.toLocaleDateString("sv-SE"), s=shiftOf(dt.getDay());
+    if(s)count[s.short]=(count[s.short]||0)+1;
+    html+=`<div class="wk-cell ${ymd===today?'today':''}">
+      <span class="d">${d}</span>
+      ${s?`<span class="w" style="background:${tint(s.color,.18)};color:${s.color}">${s.short}</span>`
+         :`<span class="wk-off">휴무</span>`}
+    </div>`;
+  }
+  $("wkGrid").innerHTML=html;
+
+  const parts=WORK_SHIFTS.map(s=>`${s.short} ${count[s.short]||0}일`);
+  const workDays=Object.values(count).reduce((a,b)=>a+b,0);
+  $("wkSummary").textContent=`${m+1}월 근무 ${workDays}일 (${parts.join(" · ")}) · 휴무 ${last.getDate()-workDays}일`;
+
+  const ts=shiftOf(new Date().getDay());
+  $("wkToday").textContent="오늘 "+(ts?ts.name:"휴무");
+}
+renderWork();
 
 /* ===== 시장 일정 =====
    날짜 규칙은 공개된 제도를 그대로 계산한다. 근거:
