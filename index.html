@@ -269,6 +269,19 @@
       <div class="hint" id="wkSummary" style="margin-top:10px"></div>
     </div>
 
+    <!-- 하원 일정 -->
+    <div class="card" data-dept="general">
+      <h2><span class="dot" style="background:#4f8cff"></span>하원 일정
+        <span id="pkState" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div id="pkToday" style="font-size:15px;font-weight:600;margin-bottom:8px"></div>
+      <div class="row" style="margin-bottom:10px">
+        <input type="time" id="pkTime" style="width:120px" onchange="setPickupTime(this.value)">
+        <button class="ghost" id="pkSkipBtn" onclick="togglePickupSkip()"></button>
+        <button class="ghost" id="pkAlarmBtn" onclick="togglePickupAlarm()"></button>
+      </div>
+      <div class="hint" id="pkNote"></div>
+    </div>
+
     <!-- 안약 스케줄러 -->
     <div class="card" data-dept="health">
       <h2><span class="dot" style="background:#f5a623"></span>안약 복용 <span id="eyeCount" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
@@ -541,8 +554,11 @@ function reloadAll(){
   holdTargets=JSON.parse(localStorage.getItem("holdTargets")||"{}");
   realizedHist=JSON.parse(localStorage.getItem("realizedHist")||"{}");
   workOverrides=JSON.parse(localStorage.getItem("workOverrides")||"{}");
+  pickupTime=localStorage.getItem("pickupTime")||PICKUP_DEFAULT;
+  pickupSkips=JSON.parse(localStorage.getItem("pickupSkips")||"[]");
+  pickupAlarm=localStorage.getItem("pickupAlarm")!=="off";
   renderScheds();renderEye();renderCashFlows();loadMonth(curMonth);
-  renderFoods();renderWork();
+  renderFoods();renderWork();renderPickup();
   // 보유종목은 잔고를 다시 받아야 하므로, 이미 받아둔 값이 있을 때만 다시 그린다
   if(typeof lastHoldings!=="undefined"&&lastHoldings.length)showHoldings(lastHoldings);
 }
@@ -2707,6 +2723,84 @@ function renderWork(){
     +(HOLIDAYS[today]?` · ${HOLIDAYS[today]}`:"");
 }
 renderWork();
+
+/* ===== 하원 일정 =====
+   월~금 정해진 시각에 아이 둘을 데리러 간다. 법정 공휴일은 하원이 없다.
+   알림은 브라우저 탭이 열려 있을 때만 동작한다(웹의 한계). 실제 알람은 폰 알람 앱을 권장. */
+const PICKUP_DEFAULT="16:20", PICKUP_LEAD=10; // 기본 시각, 몇 분 전에 알릴지
+let pickupTime=localStorage.getItem("pickupTime")||PICKUP_DEFAULT;
+let pickupSkips=JSON.parse(localStorage.getItem("pickupSkips")||"[]"); // 하원 없는 날(YYYY-MM-DD)
+let pickupAlarm=localStorage.getItem("pickupAlarm")!=="off";
+let pkNotified=""; // 같은 날 중복 알림 방지
+function savePickup(){
+  localStorage.setItem("pickupTime",pickupTime);
+  localStorage.setItem("pickupSkips",JSON.stringify(pickupSkips));
+  localStorage.setItem("pickupAlarm",pickupAlarm?"on":"off");
+  autoSaveFile();
+}
+// 평일이고, 공휴일이 아니고, 직접 건너뛴 날도 아니어야 하원이 있다
+function hasPickup(ymd,dow){
+  if(dow===0||dow===6)return false;
+  if(HOLIDAYS[ymd])return false;
+  return !pickupSkips.includes(ymd);
+}
+function setPickupTime(v){ if(!v)return; pickupTime=v; savePickup(); renderPickup(); }
+function togglePickupSkip(){
+  const t=new Date().toLocaleDateString("sv-SE");
+  const i=pickupSkips.indexOf(t);
+  if(i>=0)pickupSkips.splice(i,1); else pickupSkips.push(t);
+  savePickup(); renderPickup();
+}
+function togglePickupAlarm(){
+  pickupAlarm=!pickupAlarm;
+  if(pickupAlarm&&window.Notification&&Notification.permission==="default")Notification.requestPermission();
+  savePickup(); renderPickup();
+}
+function renderPickup(){
+  const now=new Date(), ymd=now.toLocaleDateString("sv-SE"), dow=now.getDay();
+  const on=hasPickup(ymd,dow), hol=HOLIDAYS[ymd];
+  $("pkTime").value=pickupTime;
+  const [hh,mm]=pickupTime.split(":").map(Number);
+  const at=new Date(now); at.setHours(hh,mm,0,0);
+  const left=Math.round((at-now)/60000);
+  const wk=["일","월","화","수","목","금","토"];
+
+  let head;
+  if(!on){
+    head=hol?`오늘은 ${hol} — 하원 없음`
+      :(dow===0||dow===6)?`오늘은 ${wk[dow]}요일 — 하원 없음`:"오늘은 하원 없음(직접 지정)";
+  }else if(left>0)head=`오늘 ${pickupTime} 하원 · ${left>=60?Math.floor(left/60)+"시간 "+(left%60)+"분":left+"분"} 남음`;
+  else head=`오늘 ${pickupTime} 하원 · 시간이 지났습니다`;
+  $("pkToday").innerHTML=on&&left>0&&left<=PICKUP_LEAD
+    ? `<span style="color:var(--danger)">${head}</span>` : head;
+
+  $("pkState").textContent=on?"아이 2명":"휴원";
+  $("pkSkipBtn").textContent=pickupSkips.includes(ymd)?"오늘 하원 있음으로":"오늘은 건너뛰기";
+  $("pkAlarmBtn").textContent=pickupAlarm?"🔔 알림 켜짐":"🔕 알림 꺼짐";
+  const perm=window.Notification?Notification.permission:"unsupported";
+  $("pkNote").innerHTML=`월~금 ${pickupTime}, 법정 공휴일 제외 · ${PICKUP_LEAD}분 전에 알립니다`
+    +(pickupAlarm&&perm!=="granted"
+      ? `<br><span style="color:#f5a623">브라우저 알림 권한이 없어 소리만 납니다. 🔔 버튼을 다시 눌러 허용하세요.</span>`:"")
+    +`<br>이 알림은 이 탭이 열려 있을 때만 동작합니다. 확실한 알람은 폰 알람 앱에 월~금 ${pickupTime} 반복으로 걸어두세요.`;
+}
+// 1분마다 확인. 리드타임에 들어서면 그날 한 번만 알린다.
+function checkPickupAlarm(){
+  const now=new Date(), ymd=now.toLocaleDateString("sv-SE");
+  if(!pickupAlarm||!hasPickup(ymd,now.getDay()))return;
+  const [hh,mm]=pickupTime.split(":").map(Number);
+  const at=new Date(now); at.setHours(hh,mm,0,0);
+  const left=Math.round((at-now)/60000);
+  if(left>PICKUP_LEAD||left<0||pkNotified===ymd)return;
+  pkNotified=ymd;
+  const msg=`${left}분 뒤 ${pickupTime} 하원입니다 (아이 2명)`;
+  try{
+    if(window.Notification&&Notification.permission==="granted")
+      new Notification("하원 시간",{body:msg});
+  }catch(e){}
+  playAlarm(); // 타이머와 같은 알림음을 쓴다
+}
+setInterval(()=>{renderPickup();checkPickupAlarm();},60000);
+renderPickup();
 
 /* ===== 시장 일정 =====
    날짜 규칙은 공개된 제도를 그대로 계산한다. 근거:
