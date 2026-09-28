@@ -78,9 +78,11 @@
   /* 0회는 조각이 하나도 없어 빈자리가 보이지 않으므로, 자리만 점선으로 남긴다 */
   .eye-ring.zero{border:1px dashed var(--border);opacity:.5}
   .wk-cell.picked{border-color:var(--accent2);border-width:2px}
-  .eye-panel{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px}
-  .eye-cols{display:flex;gap:18px;flex-wrap:wrap}
-  .eye-cols>div{flex:1;min-width:150px}
+  /* 좌측 체크 패널 + 우측 달력. 좁아지면 세로로 쌓인다 */
+  .eye-split{display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start}
+  @media(max-width:860px){.eye-split{grid-template-columns:1fr}}
+  .eye-panel{padding:12px;border:1px solid var(--border);border-radius:10px}
+  .eye-cols{display:flex;flex-direction:column;gap:12px}
   .wk-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px}
   .wk-legend span.chip{font-size:11px;font-weight:700;border-radius:5px;padding:2px 7px}
   /* 시장 일정 */
@@ -259,14 +261,18 @@
     <div class="card full" data-dept="general">
       <h2><span class="dot" style="background:#f5a623"></span>안약 복용
         <span id="eyeCount" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
-      <div class="row" style="margin-bottom:10px">
-        <button class="ghost" onclick="eyeMove(-1)">◀ 이전</button>
-        <b id="eyeTitle" style="min-width:110px;text-align:center"></b>
-        <button class="ghost" onclick="eyeMove(1)">다음 ▶</button>
-        <button class="ghost" onclick="eyeMove(0)">이번 달</button>
+      <div class="eye-split">
+        <div class="eye-panel" id="eyePanel"></div>
+        <div>
+          <div class="row" style="margin-bottom:10px">
+            <button class="ghost" onclick="eyeMove(-1)">◀ 이전</button>
+            <b id="eyeTitle" style="min-width:110px;text-align:center"></b>
+            <button class="ghost" onclick="eyeMove(1)">다음 ▶</button>
+            <button class="ghost" onclick="eyeMove(0)">이번 달</button>
+          </div>
+          <div class="wk-grid" id="eyeGrid"></div>
+        </div>
       </div>
-      <div class="wk-grid" id="eyeGrid"></div>
-      <div class="eye-panel" id="eyePanel"></div>
       <div class="hint" id="eyeNote" style="margin-top:10px"></div>
     </div>
 
@@ -960,17 +966,17 @@ function renderEye(){
       <span class="txt">${it.name}</span>
     </li>`:"").join("");
   $("eyePanel").innerHTML=`
-    <div class="row" style="margin-bottom:10px">
+    <div style="margin-bottom:10px">
       <b>${sd.toLocaleDateString("ko-KR")} (${wk[sd.getDay()]})${eyeSel===today?" · 오늘":""}</b>
-      <span class="hint" style="margin:0 auto 0 8px">${st.filter(Boolean).length} / ${EYE_ITEMS.length} 완료</span>
-      <button class="ghost" onclick="resetEye()">이 날 기록 초기화</button>
+      <div class="hint" style="margin:2px 0 0">${st.filter(Boolean).length} / ${EYE_ITEMS.length} 완료</div>
     </div>
     <div class="eye-cols">
       <div><div style="font-size:13px;color:var(--muted);margin-bottom:6px">오전</div>
         <ul class="sched-list" style="margin-top:0">${rows("am")}</ul></div>
       <div><div style="font-size:13px;color:var(--muted);margin-bottom:6px">오후</div>
         <ul class="sched-list" style="margin-top:0">${rows("pm")}</ul></div>
-    </div>`;
+    </div>
+    <button class="ghost" style="margin-top:12px;width:100%" onclick="resetEye()">이 날 기록 초기화</button>`;
   $("eyeNote").textContent="날짜를 누르면 그 날 기록을 고칠 수 있습니다. 링이 꽉 차면 그날 4회를 모두 넣은 것입니다.";
 }
 renderEye();
