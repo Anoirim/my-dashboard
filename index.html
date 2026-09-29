@@ -955,8 +955,10 @@ function renderEye(){
   }
   $("eyeGrid").innerHTML=html;
 
+  // 아직 오지 않은 날은 분모에서 뺀다. 이번 달은 그래서 "오늘까지"로 적어야 오해가 없다
   const max=tracked*EYE_ITEMS.length;
-  $("eyeCount").textContent=max?`이달 ${done} / ${max}회 (${Math.round(done/max*100)}%)`:"";
+  const label=tracked===last.getDate()?"이달":"오늘까지";
+  $("eyeCount").textContent=max?`${label} ${done} / ${max}회 (${Math.round(done/max*100)}%)`:"";
 
   // 선택한 날짜의 체크 패널
   const st=loadEye(eyeSel), sd=new Date(eyeSel+"T00:00:00");
