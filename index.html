@@ -180,6 +180,9 @@
   .htbl tr.hrow-merged td{background:rgba(79,140,255,.08);font-weight:600}
   .htbl tr.hrow-merged:hover td{background:rgba(79,140,255,.14)}
   .htbl .acct.merged{background:rgba(79,140,255,.18);color:var(--accent)}
+  /* 짝이 되는 두 값을 한 칸에 위아래로 둔다 (매입가/현재가, 본전가/목표가) */
+  .htbl .duo{display:flex;flex-direction:column;gap:2px;align-items:flex-end;line-height:1.3}
+  .htbl .duo .sub{font-size:11px}
   .b-high{background:rgba(51,214,159,.15);color:var(--accent2)}
   .b-mid{background:rgba(245,166,35,.15);color:#f5a623}
   .b-low{background:rgba(139,151,173,.15);color:var(--muted)}
@@ -1690,15 +1693,19 @@ function renderHoldings(hs){
       <td class="l">${acct}</td>
       <td class="l"><span class="hold-link" onclick="analyzeHolding('${h.code}')" title="주식분석에서 조회">${h.name}</span><span style="color:var(--muted);font-size:10px"> ${h.code}</span></td>
       <td>${h.qty.toLocaleString()}</td>
-      <td>${won(h.avg)}</td>
-      <td>${won(bep)}</td>
-      <td class="${h.price>=h.avg?"up":"down"}">${won(h.price)} <span style="font-size:11px">(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})</span></td>
+      <td><div class="duo">
+        <span>${won(h.avg)}</span>
+        <span class="sub ${h.price>=h.avg?"up":"down"}">${won(h.price)} (${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})</span>
+      </div></td>
+      <td><div class="duo">
+        <span>${won(bep)}</span>
+        <span class="sub" style="color:var(--accent2)">${won(target)}</span>
+      </div></td>
       <td>${won(evalAmtOf(h))}</td>
       <td${h.merged?' style="color:var(--muted)"':''}>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
       <td class="${up?"up":"down"}">${up?"+":""}${won(h.pnl)}</td>
       <td class="${up?"up":"down"}">${up?"+":""}${h.pnlRate}%</td>
       <td class="${up?"up":"down"}"${h.merged?' style="opacity:.75"':''}>${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
-      <td style="color:var(--accent2)">${won(target)}</td>
       ${inputs}
     </tr>`;
   };
@@ -1716,22 +1723,21 @@ function renderHoldings(hs){
   const tup=totPnl>=0;
   $("holdingsWrap").innerHTML=`<table class="htbl">
     <thead><tr>
-      <th class="l">계좌</th><th class="l">종목</th><th>수량</th><th>매입가</th><th>본전가</th><th>현재가</th>
+      <th class="l">계좌</th><th class="l">종목</th><th>수량</th>
+      <th><div class="duo"><span>매입가</span><span class="sub">현재가</span></div></th>
+      <th><div class="duo"><span>본전가</span><span class="sub">목표가(+${$("hTarget").value}%)</span></div></th>
       <th>평가금액</th><th>비중</th><th>평가손익</th><th>손익률</th><th>기여도</th>
-      <th>목표가(+${$("hTarget").value}%)</th>
       <th>목표 입력</th><th>수량</th><th>예상이익</th>
     </tr></thead>
     <tbody>${bodyHtml}</tbody>
     <tfoot><tr>
       <td class="l" colspan="4">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)}</span></td>
-      <td></td>
-      <td></td>
+      <td style="color:var(--accent2)">${won(totTarget)}</td>
       <td>${won(totEval)}</td>
       <td>100%</td>
       <td class="${tup?"up":"down"}">${tup?"+":""}${won(totPnl)}</td>
       <td class="${tup?"up":"down"}">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</td>
       <td>100%</td>
-      <td style="color:var(--accent2)">${won(totTarget)}</td>
       <td></td>
       <td></td>
       <td class="${totGain>=0?'up':'down'}">${totGain>=0?'+':''}${won(totGain)}</td>
