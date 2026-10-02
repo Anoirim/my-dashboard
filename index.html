@@ -169,7 +169,8 @@
   .drag:active{cursor:grabbing}
   .sched-item.drag-over{border-top:2px solid var(--accent)}
   /* 보유 종목 테이블 */
-  .htbl{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap;min-width:720px}
+  /* 숫자를 등폭으로 — 자릿수가 달라도 같은 자리가 세로로 맞는다 */
+  .htbl{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap;min-width:720px;font-variant-numeric:tabular-nums}
   .htbl th,.htbl td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--border)}
   .htbl th{color:var(--muted);font-weight:600;background:var(--card)}
   .htbl td.l,.htbl th.l{text-align:left}
@@ -182,6 +183,10 @@
   .htbl .acct.merged{background:rgba(79,140,255,.18);color:var(--accent)}
   /* 짝이 되는 두 값을 한 칸에 위아래로 둔다 (매입가/현재가, 본전가/목표가) */
   .htbl .duo{display:flex;flex-direction:column;gap:2px;align-items:flex-end;line-height:1.3}
+  /* 매입가·현재가는 자릿수가 세로로 맞아야 비교가 쉽다.
+     금액 2단은 오른쪽 정렬로 묶고, 증감액만 그 바깥 오른쪽에 따로 세운다 */
+  .htbl .pricecell{display:flex;justify-content:flex-end;gap:5px;align-items:flex-end}
+  .htbl .pricecell .delta{font-weight:400;white-space:nowrap}
   .b-high{background:rgba(51,214,159,.15);color:var(--accent2)}
   .b-mid{background:rgba(245,166,35,.15);color:#f5a623}
   .b-low{background:rgba(139,151,173,.15);color:var(--muted)}
@@ -1692,9 +1697,12 @@ function renderHoldings(hs){
       <td class="l">${acct}</td>
       <td class="l"><span class="hold-link" onclick="analyzeHolding('${h.code}')" title="주식분석에서 조회">${h.name}</span><span style="color:var(--muted);font-size:10px"> ${h.code}</span></td>
       <td>${h.qty.toLocaleString()}</td>
-      <td><div class="duo">
-        <span>${won(h.avg)}</span>
-        <span class="sub ${h.price>=h.avg?"up":"down"}">${won(h.price)} (${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})</span>
+      <td><div class="pricecell">
+        <div class="duo">
+          <span>${won(h.avg)}</span>
+          <span class="${h.price>=h.avg?"up":"down"}">${won(h.price)}</span>
+        </div>
+        <span class="delta ${h.price>=h.avg?"up":"down"}">(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})</span>
       </div></td>
       <td><div class="duo">
         <span>${won(bep)}</span>
@@ -1703,8 +1711,8 @@ function renderHoldings(hs){
       <td>${won(evalAmtOf(h))}</td>
       <td${h.merged?' style="color:var(--muted)"':''}>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
       <td class="${up?"up":"down"}"><div class="duo">
-        <span>${up?"+":""}${won(h.pnl)}</span>
-        <span class="sub">${up?"+":""}${h.pnlRate}%</span>
+        <span>${up?"+":""}${h.pnlRate}%</span>
+        <span class="sub">${up?"+":""}${won(h.pnl)}</span>
       </div></td>
       <td class="${up?"up":"down"}"${h.merged?' style="opacity:.75"':''}>${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
       ${inputs}
@@ -1728,7 +1736,7 @@ function renderHoldings(hs){
       <th><div class="duo"><span>매입가</span><span class="sub">현재가</span></div></th>
       <th><div class="duo"><span>본전가</span><span class="sub">목표가(+${$("hTarget").value}%)</span></div></th>
       <th>평가금액</th><th>비중</th>
-      <th><div class="duo"><span>평가손익</span><span class="sub">손익률</span></div></th>
+      <th><div class="duo"><span>손익률</span><span class="sub">평가손익</span></div></th>
       <th>기여도</th>
       <th>목표 입력</th><th>수량</th><th>예상이익</th>
     </tr></thead>
@@ -1739,8 +1747,8 @@ function renderHoldings(hs){
       <td>${won(totEval)}</td>
       <td>100%</td>
       <td class="${tup?"up":"down"}"><div class="duo">
-        <span>${tup?"+":""}${won(totPnl)}</span>
-        <span class="sub">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span>
+        <span>${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span>
+        <span class="sub">${tup?"+":""}${won(totPnl)}</span>
       </div></td>
       <td>100%</td>
       <td></td>
