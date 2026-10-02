@@ -182,7 +182,6 @@
   .htbl .acct.merged{background:rgba(79,140,255,.18);color:var(--accent)}
   /* 짝이 되는 두 값을 한 칸에 위아래로 둔다 (매입가/현재가, 본전가/목표가) */
   .htbl .duo{display:flex;flex-direction:column;gap:2px;align-items:flex-end;line-height:1.3}
-  .htbl .duo .sub{font-size:11px}
   .b-high{background:rgba(51,214,159,.15);color:var(--accent2)}
   .b-mid{background:rgba(245,166,35,.15);color:#f5a623}
   .b-low{background:rgba(139,151,173,.15);color:var(--muted)}
@@ -1703,8 +1702,10 @@ function renderHoldings(hs){
       </div></td>
       <td>${won(evalAmtOf(h))}</td>
       <td${h.merged?' style="color:var(--muted)"':''}>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
-      <td class="${up?"up":"down"}">${up?"+":""}${won(h.pnl)}</td>
-      <td class="${up?"up":"down"}">${up?"+":""}${h.pnlRate}%</td>
+      <td class="${up?"up":"down"}"><div class="duo">
+        <span>${up?"+":""}${won(h.pnl)}</span>
+        <span class="sub">${up?"+":""}${h.pnlRate}%</span>
+      </div></td>
       <td class="${up?"up":"down"}"${h.merged?' style="opacity:.75"':''}>${contrib===null?"-":contrib.toFixed(1)+"%"}</td>
       ${inputs}
     </tr>`;
@@ -1726,7 +1727,9 @@ function renderHoldings(hs){
       <th class="l">계좌</th><th class="l">종목</th><th>수량</th>
       <th><div class="duo"><span>매입가</span><span class="sub">현재가</span></div></th>
       <th><div class="duo"><span>본전가</span><span class="sub">목표가(+${$("hTarget").value}%)</span></div></th>
-      <th>평가금액</th><th>비중</th><th>평가손익</th><th>손익률</th><th>기여도</th>
+      <th>평가금액</th><th>비중</th>
+      <th><div class="duo"><span>평가손익</span><span class="sub">손익률</span></div></th>
+      <th>기여도</th>
       <th>목표 입력</th><th>수량</th><th>예상이익</th>
     </tr></thead>
     <tbody>${bodyHtml}</tbody>
@@ -1735,8 +1738,10 @@ function renderHoldings(hs){
       <td style="color:var(--accent2)">${won(totTarget)}</td>
       <td>${won(totEval)}</td>
       <td>100%</td>
-      <td class="${tup?"up":"down"}">${tup?"+":""}${won(totPnl)}</td>
-      <td class="${tup?"up":"down"}">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</td>
+      <td class="${tup?"up":"down"}"><div class="duo">
+        <span>${tup?"+":""}${won(totPnl)}</span>
+        <span class="sub">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span>
+      </div></td>
       <td>100%</td>
       <td></td>
       <td></td>
