@@ -2961,6 +2961,31 @@ function renderMarketCal(){
 }
 renderMarketCal();
 
+/* ===== 날짜 바뀜 감지 =====
+   탭을 켜둔 채 자정을 넘기면 "오늘"이 어제에 머문다. 화면을 켜둔 채로도 날이 바뀌게 한다.
+   백그라운드 탭에서는 타이머가 느려지거나 멈추므로 탭이 다시 보일 때도 확인한다. */
+let lastSeenDay=new Date().toLocaleDateString("sv-SE");
+function applyNewDay(prev){
+  const today=new Date().toLocaleDateString("sv-SE");
+  const firstOfThisMonth=()=>new Date(+today.slice(0,4),+today.slice(5,7)-1,1);
+  $("today").textContent=new Date().toLocaleDateString("ko-KR",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+
+  // 일부러 다른 날·다른 달을 보고 있었다면 그대로 둔다. 어제(=직전의 오늘)를 보던 경우만 따라 옮긴다
+  if(eyeSel===prev)eyeSel=today;
+  if(mkYmd(eyeCur).slice(0,7)===prev.slice(0,7))eyeCur=firstOfThisMonth();
+  if(mkYmd(wkCur).slice(0,7)===prev.slice(0,7))wkCur=firstOfThisMonth();
+
+  renderEye();renderWork();renderFoods();renderMarketCal();renderPickup();
+}
+function checkDayChange(){
+  const today=new Date().toLocaleDateString("sv-SE");
+  if(today===lastSeenDay)return;
+  const prev=lastSeenDay; lastSeenDay=today;
+  applyNewDay(prev);
+}
+setInterval(checkDayChange,60000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkDayChange();});
+
 /* ===== 부서 탭 ===== */
 let curDept="fin";
 function switchDept(d){
