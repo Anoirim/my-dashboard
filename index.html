@@ -193,6 +193,9 @@
      칸은 보통 굵기로 두고 통합 행의 금액만 굵게 한다 */
   .htbl .pricecell{font-weight:400}
   .htbl tr.hrow-merged .pricecell span:not(.delta){font-weight:600}
+  /* 머리글·합계도 같은 격자를 써야 제목과 금액의 오른쪽 끝이 값과 같은 줄에 선다 */
+  .htbl th .pricecell span{font-weight:600}
+  .htbl tfoot .pricecell span{font-weight:700}
   .b-high{background:rgba(51,214,159,.15);color:var(--accent2)}
   .b-mid{background:rgba(245,166,35,.15);color:#f5a623}
   .b-low{background:rgba(139,151,173,.15);color:var(--muted)}
@@ -1735,10 +1738,16 @@ function renderHoldings(hs){
   });
   const bodyHtml=body.join("");
   const tup=totPnl>=0;
+  dw=Math.max(dw,6); // 머리글의 "(증감)"이 들어갈 최소 폭
   $("holdingsWrap").innerHTML=`<table class="htbl" style="--dw:${dw}ch">
     <thead><tr>
       <th class="l">계좌</th><th class="l">종목</th><th>수량</th>
-      <th><div class="duo"><span>매입가</span><span>현재가 (증감)</span><span>본전가</span><span>목표가(+${$("hTarget").value}%)</span></div></th>
+      <th><div class="pricecell">
+        <span>매입가</span><span></span>
+        <span>현재가</span><span class="delta">(증감)</span>
+        <span>본전가</span><span></span>
+        <span>목표가</span><span class="delta">(+${$("hTarget").value}%)</span>
+      </div></th>
       <th>평가금액</th><th>비중</th>
       <th><div class="duo"><span>손익률</span><span class="sub">평가손익</span></div></th>
       <th>기여도</th>
@@ -1747,7 +1756,7 @@ function renderHoldings(hs){
     <tbody>${bodyHtml}</tbody>
     <tfoot><tr>
       <td class="l" colspan="3">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)}</span></td>
-      <td style="color:var(--accent2)" title="목표가 기준 평가금액">${won(totTarget)}</td>
+      <td style="color:var(--accent2)" title="목표가 기준 평가금액"><div class="pricecell"><span>${won(totTarget)}</span><span></span></div></td>
       <td>${won(totEval)}</td>
       <td>100%</td>
       <td class="${tup?"up":"down"}"><div class="duo">
