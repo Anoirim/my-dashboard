@@ -203,6 +203,8 @@
      금액 4단을 한 열에 오른쪽 정렬로 쌓고, 현재가의 증감만 그 바깥 열에 따로 세운다 */
   .htbl .pricecell{display:grid;grid-template-columns:auto var(--dw,auto);column-gap:5px;row-gap:2px;justify-content:end;text-align:right}
   .htbl .pricecell .delta{font-weight:400;white-space:nowrap;text-align:left}
+  /* 평가금액 칸(매입금 / 평가금액 (평가손익))도 같은 격자를 쓰되, 괄호 열 폭은 손익 기준(--dw2)으로 따로 잡는다 */
+  .htbl .pricecell.amt{grid-template-columns:auto var(--dw2,auto)}
   /* 증감 열 폭(ch)은 칸 자신의 글꼴로 잰다. 통합 행의 굵은 글꼴로 재면 폭이 커져 금액이 다시 밀리므로,
      칸은 보통 굵기로 두고 통합 행의 금액만 굵게 한다 */
   .htbl .pricecell{font-weight:400}
@@ -1728,7 +1730,7 @@ function renderHoldings(hs){
   const ratio=(v,base)=>base?v/base*100:0;
   const dupes=mergedCodes(hs);
   // 증감 글자 수가 행마다 달라 금액 열 위치가 행마다 밀린다. 가장 긴 증감에 맞춰 폭을 표 전체에 고정한다
-  let dw=0;
+  let dw=0, dw2=0;
 
   // 통합 행은 합계에 중복 반영되면 안 되므로, 집계는 실제 계좌 행(merged 아님)에서만 한다.
   const row=h=>{
@@ -1742,6 +1744,7 @@ function renderHoldings(hs){
     }
     const up=(h.pnl||0)>=0;
     const delta=`(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})`; dw=Math.max(dw,delta.length);
+    const pnlTxt=`(${up?"+":""}${won(h.pnl)})`; dw2=Math.max(dw2,pnlTxt.length);
     // 총손익이 0에 가까우면 기여도가 폭주해 숫자가 무의미해진다
     const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
     const k=h.merged?null:htKey(h), e=h.merged?null:htEntry(h);
@@ -1766,7 +1769,10 @@ function renderHoldings(hs){
         <span style="color:var(--muted)">${won(bep)}</span><span></span>
         <span style="color:var(--accent2)">${won(target)}</span><span></span>
       </div></td>
-      <td>${won(evalAmtOf(h))}</td>
+      <td><div class="pricecell amt">
+        <span>${won(h.avg*h.qty)}</span><span></span>
+        <span>${won(evalAmtOf(h))}</span><span class="delta ${up?"up":"down"}">${pnlTxt}</span>
+      </div></td>
       <td${h.merged?' style="color:var(--muted)"':''}>${ratio(evalAmtOf(h),sumEval).toFixed(1)}%</td>
       <td class="${up?"up":"down"}"><div class="duo">
         <span>${up?"+":""}${h.pnlRate}%</span>
@@ -1789,7 +1795,9 @@ function renderHoldings(hs){
   const bodyHtml=body.join("");
   const tup=totPnl>=0;
   dw=Math.max(dw,6); // 머리글의 "(증감)"이 들어갈 최소 폭
-  $("holdingsWrap").innerHTML=`<table class="htbl" style="--dw:${dw}ch">
+  const totPnlTxt=`(${totPnl>=0?"+":""}${won(totPnl)})`;
+  dw2=Math.max(dw2,totPnlTxt.length,10); // 합계 손익과 머리글 "(평가손익)"까지 들어갈 폭
+  $("holdingsWrap").innerHTML=`<table class="htbl" style="--dw:${dw}ch;--dw2:${dw2}ch">
     <thead><tr>
       <th class="c">계좌</th><th class="c">종목</th><th class="c">수량</th>
       <th><div class="pricecell">
@@ -1798,7 +1806,10 @@ function renderHoldings(hs){
         <span>본전가</span><span></span>
         <span>목표가</span><span class="delta">(+${$("hTarget").value}%)</span>
       </div></th>
-      <th>평가금액</th><th>비중</th>
+      <th><div class="pricecell amt">
+        <span>매입금</span><span></span>
+        <span>평가금액</span><span class="delta">(평가손익)</span>
+      </div></th><th>비중</th>
       <th><div class="duo"><span>손익률</span><span class="sub">평가손익</span></div></th>
       <th>기여도</th>
       <th class="c">목표 입력</th><th class="c">수량</th><th class="c">예상이익</th>
@@ -1807,7 +1818,10 @@ function renderHoldings(hs){
     <tfoot><tr>
       <td class="l" colspan="3">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)}</span></td>
       <td style="color:var(--accent2)" title="목표가 기준 평가금액"><div class="pricecell"><span>${won(totTarget)}</span><span></span></div></td>
-      <td>${won(totEval)}</td>
+      <td><div class="pricecell amt">
+        <span>${won(totCost)}</span><span></span>
+        <span>${won(totEval)}</span><span class="delta ${totPnl>=0?"up":"down"}">${totPnlTxt}</span>
+      </div></td>
       <td>100%</td>
       <td class="${tup?"up":"down"}"><div class="duo">
         <span>${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span>
