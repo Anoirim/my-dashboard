@@ -44,7 +44,9 @@
   .sched-item .txt{flex:1;font-size:14px}
   .sched-item .sdate{color:var(--muted);font-size:12px;font-weight:600;min-width:62px}
   /* 안약 달력에 병기하는 스케줄 (길면 말줄임, 3개째부터는 +N) */
-  #eyeGrid .wk-cell{min-width:0;overflow:hidden}
+  /* 칸 자체는 자르지 않는다(복용 링이 잘리면 안 됨). 긴 일정은 줄 단위로만 말줄임하고, 링은 줄어들지 않게 고정 */
+  #eyeGrid .wk-cell{min-width:0}
+  #eyeGrid .eye-ring{flex-shrink:0}
   #eyeGrid .wk-cell.future{opacity:.8}
   .wk-cell .ev{font-size:10px;line-height:1.3;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .wk-cell .ev.done{text-decoration:line-through;color:var(--muted)}
