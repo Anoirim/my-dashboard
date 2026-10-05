@@ -1,6 +1,20 @@
-task: my-dashboard 거래내역(체결) 카드 추가
+task: my-dashboard 보유종목 표 재구성 + 스케줄러↔안약 달력 연동 + 문서 갱신 (2026-10-05, PR #1~#6 main 머지 완료)
 files:
-  - index.html: 완료 (HTML 카드 230-247줄, JS /* ===== 거래내역 ===== */ 976-1067줄)
-progress: 1/1
-next_step: 배포 후 `원본 응답 필드 보기` details로 KIS output1 실제 키 확인 → TR_F 후보 배열 확정
-note: api/kis.js 미수정. localStorage 저장 없음 → autoSaveFile 호출 불필요.
+  - index.html: 완료
+    - 하원 일정·스케줄러 시간 입력칸 120→150px (#pkTime, #schedTime)
+    - 보유종목 표 (renderHoldings): 가격 칸 4단 = 매입가 / 현재가(증감/손익률) / 본전가 / 목표가,
+      평가금액 칸 2단 = 매입금 / 평가금액(평가손익), 손익률·평가손익 별도 칸과 목표가 별도 칸 제거.
+      .pricecell grid + 괄호 열 폭 --dw/--dw2(ch, 표 전체 최댓값)로 행 간 자릿수 정렬, 머리글·합계도 같은 격자.
+      #holdingsWrap만 세로 가운데 정렬, 계좌·종목·수량·목표 입력·수량·예상이익은 가로 가운데 정렬.
+      합계 줄: "합계 +수익률", 가격 칸 4단째에 "목표 평가"(목표가×수량 합), 평가금액 칸에 총매입금/총평가(총손익)
+    - 스케줄러: scheds 항목에 date(YYYY-MM-DD) 추가, 날짜·시간 순 정렬, schedChanged()가 renderEye()까지 갱신
+    - 안약 달력: 그날 일정 2개+N 병기(eyeSchedMarks), 미래 날짜도 선택 가능(복용 기록은 막음),
+      패널에 그날 일정 목록·"이 날짜로 일정 추가"(addSchedOn), 칸은 자르지 않고 복용 링 flex-shrink:0
+  - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준으로 전면 갱신 (줄 번호 대신 함수명·블록 주석 기준)
+progress: 완료 (모두 main 반영·Vercel 배포)
+next_step: 실제 계좌 데이터로 배포본 보유종목 표 정렬·표시 확인 (검증은 샘플 데이터 + Chart 스텁으로만 했음)
+note:
+  - 날짜 기능 이전 스케줄러 일정은 date가 없어 달력에 안 나옴(목록 맨 위에만). 재등록 필요
+  - 이전 체크포인트(거래내역 TR_F 필드 확인)는 코드에 "KIS 공식 스펙으로 확정"으로 정리됨
+  - 클라우드 세션 배포 흐름: 작업 브랜치 push → 사용자 "승인" → PR 생성 → rebase 머지
+  - 클라우드 세션에는 Serena MCP 없음(uvx --from serena-agent 설치·실행은 가능 확인, .mcp.json 미추가)
