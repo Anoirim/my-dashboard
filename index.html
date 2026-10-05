@@ -1808,7 +1808,11 @@ function renderHoldings(hs){
     <tbody>${bodyHtml}</tbody>
     <tfoot><tr>
       <td class="l" colspan="3">합계 <span class="${tup?"up":"down"}">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span></td>
-      <td style="color:var(--accent2)" title="목표가 기준 평가금액"><div class="pricecell"><span>${won(totTarget)}</span><span></span></div></td>
+      <td title="모든 종목이 목표가에 도달했을 때의 평가금액 합계 (목표가 × 보유수량)"><div class="pricecell">
+        <!-- 합계는 목표가에만 의미가 있으므로 목표가 줄(4단째) 높이에 둔다. 빈 줄은 &nbsp;로 높이를 유지 -->
+        <span>&nbsp;</span><span></span><span>&nbsp;</span><span></span><span>&nbsp;</span><span></span>
+        <span style="color:var(--accent2)">${won(totTarget)}</span><span class="delta" style="color:var(--muted)">목표 평가</span>
+      </div></td>
       <td><div class="pricecell amt">
         <span>${won(totCost)}</span><span></span>
         <span>${won(totEval)}</span><span class="delta ${totPnl>=0?"up":"down"}">${totPnlTxt}</span>
