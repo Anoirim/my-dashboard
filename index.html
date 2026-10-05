@@ -42,6 +42,13 @@
   .sched-item.done .txt{text-decoration:line-through;color:var(--muted)}
   .sched-item .time{color:var(--accent);font-size:12px;font-weight:600;min-width:44px}
   .sched-item .txt{flex:1;font-size:14px}
+  .sched-item .sdate{color:var(--muted);font-size:12px;font-weight:600;min-width:62px}
+  /* 안약 달력에 병기하는 스케줄 (길면 말줄임, 3개째부터는 +N) */
+  #eyeGrid .wk-cell{min-width:0;overflow:hidden}
+  #eyeGrid .wk-cell.future{opacity:.8}
+  .wk-cell .ev{font-size:10px;line-height:1.3;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wk-cell .ev.done{text-decoration:line-through;color:var(--muted)}
+  .wk-cell .ev.more{color:var(--muted)}
   .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
   /* 근무 일정 달력 */
   .wk-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
@@ -271,6 +278,7 @@
     <div class="card" data-dept="general">
       <h2><span class="dot" style="background:var(--accent2)"></span>스케줄러</h2>
       <div class="row">
+        <input type="date" id="schedDate" style="width:150px">
         <input type="time" id="schedTime" style="width:150px">
         <input type="text" id="schedText" placeholder="할 일 입력" style="flex:1">
         <button onclick="addSched()">추가</button>
@@ -761,28 +769,42 @@ function pauseTimer(){
 function resetTimer(){pauseTimer();remain=total;render();}
 render();
 
-/* ===== 스케줄러 (localStorage) ===== */
+/* ===== 스케줄러 (localStorage) =====
+   날짜(date: YYYY-MM-DD)가 있는 일정은 안약 달력에도 병기한다.
+   날짜 기능 이전에 넣은 일정은 date가 없어 목록에만 나온다. */
 let scheds = JSON.parse(localStorage.getItem("scheds")||"[]");
 function saveScheds(){localStorage.setItem("scheds",JSON.stringify(scheds));autoSaveFile();}
+// 날짜 없는 예전 일정이 먼저, 그다음 날짜·시간 순
+function sortScheds(){scheds.sort((a,b)=>((a.date||"")+(a.time||"")).localeCompare((b.date||"")+(b.time||"")));}
+function schedDateLabel(ymd){
+  if(!ymd)return "";
+  const d=new Date(ymd+"T00:00:00");
+  return `${d.getMonth()+1}/${d.getDate()}(${"일월화수목금토"[d.getDay()]})`;
+}
 function renderScheds(){
-  scheds.sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  sortScheds();
   $("schedList").innerHTML = scheds.map((s,i)=>`
     <li class="sched-item ${s.done?'done':''}">
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSched(${i})">
+      <span class="sdate">${schedDateLabel(s.date)}</span>
       <span class="time">${s.time||''}</span>
       <span class="txt">${s.text.replace(/</g,'&lt;')}</span>
       <button class="del" onclick="delSched(${i})">✕</button>
     </li>`).join("") || '<div class="hint">등록된 일정이 없습니다.</div>';
 }
+// 스케줄이 바뀌면 안약 달력의 병기도 함께 다시 그린다
+function schedChanged(){saveScheds();renderScheds();renderEye();}
 function addSched(){
   const text=$("schedText").value.trim();if(!text)return;
-  scheds.push({time:$("schedTime").value,text,done:false});
+  scheds.push({date:$("schedDate").value,time:$("schedTime").value,text,done:false});
+  // 같은 날 일정을 이어 넣기 쉽도록 날짜는 남긴다
   $("schedText").value="";$("schedTime").value="";
-  saveScheds();renderScheds();
+  schedChanged();
 }
-function toggleSched(i){scheds[i].done=!scheds[i].done;saveScheds();renderScheds();}
-function delSched(i){scheds.splice(i,1);saveScheds();renderScheds();}
+function toggleSched(i){scheds[i].done=!scheds[i].done;schedChanged();}
+function delSched(i){scheds.splice(i,1);schedChanged();}
 $("schedText").addEventListener("keydown",e=>{if(e.key==="Enter")addSched();});
+$("schedDate").value=new Date().toLocaleDateString("sv-SE");
 renderScheds();
 
 /* ===== 식품 재고 (폐기 감소 목적: 위험한 것부터 보여준다) ===== */
@@ -942,10 +964,22 @@ function eyeMove(n){
   eyeCur.setDate(1);
   renderEye();
 }
-// 미래 날짜는 기록할 것이 없으므로 고르지 못하게 한다
-function selectEyeDay(ymd){ if(ymd>eyeToday())return; eyeSel=ymd; renderEye(); }
-function toggleEye(i){const st=loadEye(eyeSel);st[i]=!st[i];saveEye(st,eyeSel);renderEye();}
-function resetEye(){saveEye(EYE_EMPTY.slice(),eyeSel);renderEye();}
+// 미래 날짜도 일정 확인용으로 고를 수 있다. 복용 기록은 패널에서 막는다
+function selectEyeDay(ymd){ eyeSel=ymd; renderEye(); }
+function schedsOn(ymd){return scheds.map((s,i)=>({s,i})).filter(x=>x.s.date===ymd);}
+// 달력 칸에 넣을 일정 줄. 칸이 좁아 2개까지만 쓰고 나머지는 +N으로 줄인다
+function eyeSchedMarks(ymd){
+  const list=schedsOn(ymd);
+  const tip=t=>t.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+  return list.slice(0,2).map(({s})=>{
+    const t=(s.time?s.time+" ":"")+s.text;
+    return `<div class="ev ${s.done?'done':''}" title="${tip(t)}">${t.replace(/</g,"&lt;")}</div>`;
+  }).join("")+(list.length>2?`<div class="ev more">+${list.length-2}</div>`:"");
+}
+// 패널의 "이 날짜로 일정 추가": 스케줄러 입력칸에 날짜를 넣고 할 일 칸으로 보낸다
+function addSchedOn(ymd){ $("schedDate").value=ymd; $("schedText").focus(); }
+function toggleEye(i){if(eyeSel>eyeToday())return;const st=loadEye(eyeSel);st[i]=!st[i];saveEye(st,eyeSel);renderEye();}
+function resetEye(){if(eyeSel>eyeToday())return;saveEye(EYE_EMPTY.slice(),eyeSel);renderEye();}
 
 // 복용 수만큼 조각이 자라 원이 된다. 채우지 않은 부분은 비워 둔다.
 function eyeRing(n){
@@ -968,10 +1002,11 @@ function renderEye(){
     const ymd=new Date(y,m,d).toLocaleDateString("sv-SE");
     const future=ymd>today, n=future?0:eyeDone(ymd);
     if(!future){done+=n;tracked++;}
-    html+=`<div class="wk-cell ${ymd===today?'today':''} ${ymd===eyeSel?'picked':''} ${future?'empty':''}"
-      ${future?'':`onclick="selectEyeDay('${ymd}')" title="누르면 이 날 기록을 고칠 수 있습니다"`}>
+    html+=`<div class="wk-cell ${ymd===today?'today':''} ${ymd===eyeSel?'picked':''} ${future?'future':''}"
+      onclick="selectEyeDay('${ymd}')" title="${future?'누르면 이 날 일정을 볼 수 있습니다':'누르면 이 날 기록을 고칠 수 있습니다'}">
       <span class="d">${d}</span>
       ${future?'':eyeRing(n)}
+      ${eyeSchedMarks(ymd)}
     </div>`;
   }
   $("eyeGrid").innerHTML=html;
@@ -982,7 +1017,7 @@ function renderEye(){
   $("eyeCount").textContent=max?`${label} ${done} / ${max}회 (${Math.round(done/max*100)}%)`:"";
 
   // 선택한 날짜의 체크 패널
-  const st=loadEye(eyeSel), sd=new Date(eyeSel+"T00:00:00");
+  const st=loadEye(eyeSel), sd=new Date(eyeSel+"T00:00:00"), selFuture=eyeSel>today;
   const rows=(sec)=>EYE_ITEMS.map((it,i)=>it.sec===sec?`
     <li class="sched-item ${st[i]?'done':''}">
       <input type="checkbox" ${st[i]?'checked':''} onchange="toggleEye(${i})">
@@ -991,16 +1026,24 @@ function renderEye(){
   $("eyePanel").innerHTML=`
     <div style="margin-bottom:10px">
       <b>${sd.toLocaleDateString("ko-KR")} (${wk[sd.getDay()]})${eyeSel===today?" · 오늘":""}</b>
-      <div class="hint" style="margin:2px 0 0">${st.filter(Boolean).length} / ${EYE_ITEMS.length} 완료</div>
+      <div class="hint" style="margin:2px 0 0">${selFuture?"아직 오지 않은 날이라 복용 기록은 없습니다":`${st.filter(Boolean).length} / ${EYE_ITEMS.length} 완료`}</div>
     </div>
-    <div class="eye-cols">
+    ${selFuture?"":`<div class="eye-cols">
       <div><div style="font-size:13px;color:var(--muted);margin-bottom:6px">오전</div>
         <ul class="sched-list" style="margin-top:0">${rows("am")}</ul></div>
       <div><div style="font-size:13px;color:var(--muted);margin-bottom:6px">오후</div>
         <ul class="sched-list" style="margin-top:0">${rows("pm")}</ul></div>
     </div>
-    <button class="ghost" style="margin-top:12px;width:100%" onclick="resetEye()">이 날 기록 초기화</button>`;
-  $("eyeNote").textContent="날짜를 누르면 그 날 기록을 고칠 수 있습니다. 링이 꽉 차면 그날 4회를 모두 넣은 것입니다.";
+    <button class="ghost" style="margin-top:12px;width:100%" onclick="resetEye()">이 날 기록 초기화</button>`}
+    <div style="font-size:13px;color:var(--muted);margin:14px 0 6px">일정</div>
+    <ul class="sched-list" style="margin-top:0">${schedsOn(eyeSel).map(({s,i})=>`
+      <li class="sched-item ${s.done?'done':''}">
+        <input type="checkbox" ${s.done?'checked':''} onchange="toggleSched(${i})">
+        <span class="time">${s.time||''}</span>
+        <span class="txt">${s.text.replace(/</g,'&lt;')}</span>
+      </li>`).join("")||'<div class="hint" style="margin:0">이 날 일정이 없습니다.</div>'}</ul>
+    <button class="ghost" style="margin-top:8px;width:100%" onclick="addSchedOn('${eyeSel}')">이 날짜로 일정 추가</button>`;
+  $("eyeNote").textContent="날짜를 누르면 그 날 기록을 고칠 수 있습니다. 링이 꽉 차면 그날 4회를 모두 넣은 것입니다. 파란 글씨는 스케줄러의 그날 일정입니다(날짜 없이 넣은 예전 일정은 표시되지 않음).";
 }
 renderEye();
 
@@ -3009,6 +3052,7 @@ function applyNewDay(prev){
 
   // 일부러 다른 날·다른 달을 보고 있었다면 그대로 둔다. 어제(=직전의 오늘)를 보던 경우만 따라 옮긴다
   if(eyeSel===prev)eyeSel=today;
+  if($("schedDate").value===prev)$("schedDate").value=today;
   if(mkYmd(eyeCur).slice(0,7)===prev.slice(0,7))eyeCur=firstOfThisMonth();
   if(mkYmd(wkCur).slice(0,7)===prev.slice(0,7))wkCur=firstOfThisMonth();
 
