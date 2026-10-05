@@ -1739,8 +1739,8 @@ function renderHoldings(hs){
       if(e&&e.v>0){ const T=htTargetPrice(h,e); totGain+=(T*(1-fee-tax)-h.avg*(1+fee))*(e.qty>0?e.qty:h.qty); }
     }
     const up=(h.pnl||0)>=0;
-    const delta=`(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)})`; dw=Math.max(dw,delta.length);
-    const pnlTxt=`(${up?"+":""}${won(h.pnl)}/${up?"+":""}${h.pnlRate}%)`; dw2=Math.max(dw2,pnlTxt.length);
+    const delta=`(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)}/${up?"+":""}${h.pnlRate}%)`; dw=Math.max(dw,delta.length);
+    const pnlTxt=`(${up?"+":""}${won(h.pnl)})`; dw2=Math.max(dw2,pnlTxt.length);
     // 총손익이 0에 가까우면 기여도가 폭주해 숫자가 무의미해진다
     const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
     const k=h.merged?null:htKey(h), e=h.merged?null:htEntry(h);
@@ -1786,28 +1786,28 @@ function renderHoldings(hs){
   });
   const bodyHtml=body.join("");
   const tup=totPnl>=0;
-  dw=Math.max(dw,6); // 머리글의 "(증감)"이 들어갈 최소 폭
-  const totPnlTxt=`(${tup?"+":""}${won(totPnl)}/${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%)`;
-  dw2=Math.max(dw2,totPnlTxt.length,16); // 합계 손익과 머리글 "(평가손익/손익률)"까지 들어갈 폭
+  dw=Math.max(dw,12); // 머리글의 "(증감/손익률)"이 들어갈 최소 폭
+  const totPnlTxt=`(${tup?"+":""}${won(totPnl)})`;
+  dw2=Math.max(dw2,totPnlTxt.length,10); // 합계 손익과 머리글 "(평가손익)"까지 들어갈 폭
   $("holdingsWrap").innerHTML=`<table class="htbl" style="--dw:${dw}ch;--dw2:${dw2}ch">
     <thead><tr>
       <th class="c">계좌</th><th class="c">종목</th><th class="c">수량</th>
       <th><div class="pricecell">
         <span>매입가</span><span></span>
-        <span>현재가</span><span class="delta">(증감)</span>
+        <span>현재가</span><span class="delta">(증감/손익률)</span>
         <span>본전가</span><span></span>
         <span>목표가</span><span class="delta">(+${$("hTarget").value}%)</span>
       </div></th>
       <th><div class="pricecell amt">
         <span>매입금</span><span></span>
-        <span>평가금액</span><span class="delta">(평가손익/손익률)</span>
+        <span>평가금액</span><span class="delta">(평가손익)</span>
       </div></th><th>비중</th>
       <th>기여도</th>
       <th class="c">목표 입력</th><th class="c">수량</th><th class="c">예상이익</th>
     </tr></thead>
     <tbody>${bodyHtml}</tbody>
     <tfoot><tr>
-      <td class="l" colspan="3">합계 <span style="color:var(--muted);font-weight:400">· 매입 ${won(totCost)}</span></td>
+      <td class="l" colspan="3">합계 <span class="${tup?"up":"down"}">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span></td>
       <td style="color:var(--accent2)" title="목표가 기준 평가금액"><div class="pricecell"><span>${won(totTarget)}</span><span></span></div></td>
       <td><div class="pricecell amt">
         <span>${won(totCost)}</span><span></span>
