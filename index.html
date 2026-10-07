@@ -563,8 +563,8 @@
       <!-- 보유금액으로 그달 총지출을 감당할 수 있는지 -->
       <div class="row" style="align-items:center;margin:0 0 8px">
         <span style="font-size:13px;color:var(--muted)">현재 보유금액</span>
-        <input type="number" id="expCash" placeholder="보유금액(원)" style="width:170px"
-          oninput="renderExpCash()" onchange="setExpCash(this.value)" title="이 달 총지출과 비교합니다. 달마다 따로 저장됩니다.">
+        <input type="text" inputmode="numeric" id="expCash" placeholder="보유금액(원)" style="width:170px;text-align:right"
+          oninput="fmtExpCash(this);renderExpCash()" onchange="setExpCash(this.value)" title="이 달 총지출과 비교합니다. 달마다 따로 저장됩니다.">
         <span id="expCashMsg" style="font-size:14px;font-weight:600"></span>
       </div>
       <div class="hint">월 총지출 = 카드 청구액 합계 + 카드 외(계좌·현금) 정기지출. 카드로 내는 정기지출은 카드값에 이미 포함돼 중복 계산되지 않습니다.</div>
@@ -1081,15 +1081,25 @@ if(!expData[curMonth] && (localStorage.getItem("cards")||localStorage.getItem("f
 function saveExpData(){expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed});localStorage.setItem("expData",JSON.stringify(expData));autoSaveFile();}
 // 보유금액: 그달에만 해당하는 값이라 새 달로 이월하지 않는다(loadMonth의 신규 월은 cards·fixed만 만든다)
 let expGrandTotal=0, expCashMonth=null;
+// 입력칸은 자릿수 쉼표를 보여주므로 숫자만 골라 읽는다. 비어 있으면 null
+const cashNum=v=>{const d=String(v||"").replace(/[^0-9]/g,"");return d===""?null:Number(d);};
+// 입력 중에도 쉼표를 붙인다. 커서는 "앞에 있던 숫자 개수" 기준으로 같은 자리에 되돌린다
+function fmtExpCash(el){
+  const pos=el.selectionStart||0, before=el.value.slice(0,pos).replace(/[^0-9]/g,"").length;
+  const n=cashNum(el.value), out=n==null?"":n.toLocaleString("ko-KR");
+  el.value=out;
+  let i=0,seen=0; while(i<out.length&&seen<before){if(/[0-9]/.test(out[i]))seen++;i++;}
+  el.setSelectionRange(i,i);
+}
 function setExpCash(v){
-  const n=parseFloat(v), d=expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed});
-  if(v!==""&&n>=0)d.cash=n; else delete d.cash;
+  const n=cashNum(v), d=expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed});
+  if(n!=null)d.cash=n; else delete d.cash;
   saveExpData();
   renderExpCash();
 }
 function renderExpCash(){
-  const v=$("expCash").value, n=parseFloat(v);
-  if(v===""||!(n>=0)){$("expCashMsg").innerHTML=`<span style="color:var(--muted);font-weight:400;font-size:12px">입력하면 총지출 대비 여유·부족을 알려줍니다</span>`;return;}
+  const n=cashNum($("expCash").value);
+  if(n==null){$("expCashMsg").innerHTML=`<span style="color:var(--muted);font-weight:400;font-size:12px">입력하면 총지출 대비 여유·부족을 알려줍니다</span>`;return;}
   const diff=n-expGrandTotal;
   $("expCashMsg").innerHTML=diff>=0
     ?`<span class="up">총지출 ${wonKR(expGrandTotal)} 대비 ${wonKR(diff)} 여유</span>`
@@ -1243,7 +1253,7 @@ function renderExpAll(){
     <div class="exp-box total"><div class="lbl">${curMonth} 총지출 합계</div><div class="num">${wonKR(grandTotal)}</div></div>`;
   expGrandTotal=grandTotal;
   // 달이 바뀌면 그달 저장값으로 채운다. 같은 달에서는 입력 중인 값을 덮어쓰지 않는다
-  if(expCashMonth!==curMonth||document.activeElement!==$("expCash")){const c=(expData[curMonth]||{}).cash; $("expCash").value=c!=null?c:"";}
+  if(expCashMonth!==curMonth||document.activeElement!==$("expCash")){const c=(expData[curMonth]||{}).cash; $("expCash").value=c!=null?c.toLocaleString("ko-KR"):"";}
   expCashMonth=curMonth;
   renderExpCash();
   renderExpChart();
