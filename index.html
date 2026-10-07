@@ -1692,10 +1692,14 @@ function addBuyHtml(h){
   const q=h.qty+n, avg=(h.avg*h.qty+h.price*n)/q;
   const bep=avg*(1+fee)/(1-fee-tax);  // 본전가 공식은 renderHoldings와 같다
   const need=h.price*n*(1+fee);       // 매수 수수료 포함
+  // 그 계좌 예수금(D+2 정산 기준, 다른 화면과 같은 값)보다 많으면 적색. 잔고를 아직 못 받았으면 색을 바꾸지 않는다
+  const cash=acctCash(h.account);
+  const short=cash!=null&&need>cash;
+  const needSpan=`<span${short?' style="color:var(--danger)"':''}${cash!=null?` title="예수금 ${won(cash)}원${short?` · ${won(need-cash)}원 부족`:""}"`:""}>${won(need)}</span>`;
   return `<div class="addres">
     <span class="lbl">매입가</span><span>${won(avg)}</span>
     <span class="lbl">본전가</span><span style="color:var(--muted)">${won(bep)}</span>
-    <span class="lbl">필요 금액</span><span>${won(need)}</span>
+    <span class="lbl">필요 금액</span>${needSpan}
   </div>`;
 }
 // 현재가로 몇 주를 더 사야 새 매입가가 현재가와 1천원 미만으로 붙는지.
@@ -1721,6 +1725,11 @@ function fillAddBuy(key,n){
   const inp=h&&$("hadd_in_"+hcId(h));
   if(inp)inp.value=n;
   setAddBuy(key,n);
+}
+// 계좌별 예수금. 목표 현금·자산 추이와 같이 D+2 정산 예수금을 우선한다
+function acctCash(account){
+  const s=((lastBal&&lastBal.summary)||[]).find(x=>x.account===account);
+  return s?(s.cashD2||s.cash||0):null;
 }
 function setAddBuy(key,val){
   const n=parseFloat(val);
@@ -1887,7 +1896,7 @@ function renderHoldings(hs){
     +`<b>기여도</b> 총손익 ${tup?"+":""}${won(totPnl)}원 중 이 종목이 차지하는 비율`
     +`<br>기여도가 음수면 전체가 손실인데 이 종목은 이익이라는 뜻입니다.`
     +`<br><b>목표 입력</b> 가격/% 택일 · <b>수량</b> 미입력 시 보유수량 전량 · <b>예상이익</b> 세금·왕복 수수료 반영 실현이익 (ETF 거래세 면제)`
-    +`<br><b>추가 매수</b> 현재가로 n주를 더 살 때의 새 매입가·본전가와 필요 금액(매수 수수료 포함). 가정용이라 저장하지 않습니다`
+    +`<br><b>추가 매수</b> 현재가로 n주를 더 살 때의 새 매입가·본전가와 필요 금액(매수 수수료 포함). 필요 금액이 그 계좌 예수금(D+2)보다 많으면 적색. 가정용이라 저장하지 않습니다`
     +`<br><b>≈현재가 n주</b> 새 매입가가 현재가와 1천원 미만이 되는 최소 수량(현재가로 사면 매입가는 현재가와 같아지지 않음). 누르면 입력칸에 채웁니다`
     +`<br><b>통합 행</b>(흐린 배경) 같은 종목을 2개 이상 계좌에 보유할 때 표시 · 평단은 가중평균, 수수료는 계좌별로 각각 반영`
     +`<br>통합 행의 <b>비중·기여도</b>는 그 종목 전체 기준이라 계좌별 행과 더하면 중복됩니다. 아래 <b>합계</b>에는 통합 행이 포함되지 않습니다`;
