@@ -1128,7 +1128,8 @@ function renderExpCash(){
   const both=bank!=null&&hand!=null;
   // 통장만으로 비교는 현금까지 넣었을 때만 따로 보여준다(현금이 없으면 합계와 같은 값이라 중복)
   $("expCashMsg").innerHTML=`<span style="font-weight:400">= ${wonKR(n)}</span> · 총지출 ${wonKR(expGrandTotal)} 대비 `
-    +vs(n,both?"합계":"")+(both?` · `+vs(bank,"통장만"):"");
+    +vs(n,both?"합계":"")+(both?` · `+(bank>=expGrandTotal?vs(bank,"통장만")
+      :`<span class="down">${wonKR(expGrandTotal-bank)} 통장 채우기 필요</span>`):"");
 }
 
 function loadMonth(m){
