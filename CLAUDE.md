@@ -60,7 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `scheds` | 스케줄러 `[{date, time, text, done}]`. `date`(YYYY-MM-DD)가 있으면 안약 달력에도 병기. 날짜 기능 이전 항목은 `date` 없음 |
 | `eye_YYYY-MM-DD` | 날짜별 안약 복용 `[bool×4]` (오전 코솝·알파간, 오후 코솝·알파간) |
-| `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=그달 보유금액, 둘 다 이월 안 함), 보던 달. `saveExpData`는 `cash`가 지워지지 않게 기존 월 객체에 합친다 |
+| `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?, cashHand?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=그달 통장 잔액, `cashHand`=그달 현금, 모두 이월 안 함. 예전 단일 보유금액은 `cash`라 통장으로 읽힌다), 보던 달. `saveExpData`는 `cash`가 지워지지 않게 기존 월 객체에 합친다 |
 | `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
 | `workOverrides` | 근무 일정 날짜별 예외 |
 | `pickupTime`, `pickupSkips`, `pickupAlarm` | 하원 시각, 하원 없는 날, 알림 on/off |
@@ -71,7 +71,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `curDept` | 선택한 부서 탭 |
 | `dashToken`, `finnhubKey` | 프록시 접근 토큰, Finnhub API 키 |
 
-월 지출은 없는 달을 열면 직전 달에서 카드·정기지출을 자동 이월하되 청구액은 0으로 초기화한다(`loadMonth`). 카드외 비정기(`oneoff`)와 보유금액(`cash`)은 이월하지 않는다. 하단 "기타(비정기)" = 카드 비정기 + 카드외 비정기. 카드 비정기는 카드별로 `cardSplit`이 (반영액 − 그 카드 정기지출)을 구하며, 반영액 = max(청구액, 그 카드 정기지출)이라 청구액을 아직 안 넣은 새 달에도 음수가 되지 않고 정기지출이 총지출에서 빠지지 않는다. 상단 카드 총액은 입력한 청구액 그대로 보여준다. 총지출 합계 아래 보유금액 입력(`setExpCash`/`renderExpCash`)은 총지출 대비 여유·부족을 보여준다. 입력칸은 자릿수 쉼표를 보여주려고 `type="text"`이며 `fmtExpCash`가 입력 중 쉼표·커서를 맞추고 `cashNum`으로 숫자만 읽는다. 월별 지출 추이(`renderExpChart`)는 정기·기타 누적 막대이고, 막대 꼭대기가 곧 총지출이라 선 없이 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다.
+월 지출은 없는 달을 열면 직전 달에서 카드·정기지출을 자동 이월하되 청구액은 0으로 초기화한다(`loadMonth`). 카드외 비정기(`oneoff`)와 보유금액(`cash`·`cashHand`)은 이월하지 않는다. 하단 "기타(비정기)" = 카드 비정기 + 카드외 비정기. 카드 비정기는 카드별로 `cardSplit`이 (반영액 − 그 카드 정기지출)을 구하며, 반영액 = max(청구액, 그 카드 정기지출)이라 청구액을 아직 안 넣은 새 달에도 음수가 되지 않고 정기지출이 총지출에서 빠지지 않는다. 상단 카드 총액은 입력한 청구액 그대로 보여준다. 총지출 합계 아래 보유금액 입력(통장 `expCash` + 현금 `expCashHand`, `setExpCash(key,v)`/`renderExpCash`)은 두 값의 합을 총지출과 비교해 여유·부족을 보여준다. 입력칸은 자릿수 쉼표를 보여주려고 `type="text"`이며 `fmtExpCash`가 입력 중 쉼표·커서를 맞추고 `cashNum`으로 숫자만 읽는다. 월별 지출 추이(`renderExpChart`)는 정기·기타 누적 막대이고, 막대 꼭대기가 곧 총지출이라 선 없이 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다.
 
 날짜가 바뀌는 것은 `/* ===== 날짜 바뀜 감지 ===== */`의 `applyNewDay()`가 1분 간격 + 탭 복귀 시 처리한다. 날짜에 따라 달라지는 화면을 추가하면 여기서도 다시 그려야 한다.
 
