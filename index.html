@@ -1186,17 +1186,21 @@ function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value
 function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
 // 체크를 끄면 그 달 합계·카드 정기분에서 빠진다. 값이 없는 기존 데이터는 포함으로 본다.
 const fxInc=f=>f.inc!==false;
-// 카드별 청구액 분해. 청구액이 그 카드로 내는 정기지출보다 작으면(대개 아직 청구액을 안 넣은 새 달)
-// 정기지출만큼은 나갈 돈으로 보고 그 금액을 쓴다. 그래야 기타가 음수로 나오지 않고 총지출에서 정기지출이 빠지지 않는다.
+// 카드별 청구액 분해. 실제 청구된 금액인 청구액을 정기지출(예상)보다 우선한다.
+// - 청구액 입력: 청구액이 반영액. 정기분은 청구액을 넘지 않게 자르고(fx), 남는 만큼이 기타(카드 비정기)
+// - 청구액 0원(미입력): 그 카드 정기지출로 추정(est). 새 달에 기타가 음수로 나오거나 정기지출이 빠지지 않게
+// fxAll=그 카드로 내는 정기지출 전체, cut=정기지출 중 청구액에 없는 몫(청구액 < 정기일 때)
 function cardSplit(c,fixed){
-  const fx=fixed.filter(f=>fxInc(f)&&f.method===c.name).reduce((s,f)=>s+(f.amt||0),0);
-  const bill=c.bill||0, eff=Math.max(bill,fx);
-  return {fx,bill,eff,etc:eff-fx,est:bill<fx};
+  const fxAll=fixed.filter(f=>fxInc(f)&&f.method===c.name).reduce((s,f)=>s+(f.amt||0),0);
+  const bill=c.bill||0, est=!(bill>0)&&fxAll>0;
+  const eff=bill>0?bill:fxAll, fx=Math.min(fxAll,eff);
+  return {fxAll,fx,bill,eff,etc:eff-fx,est,cut:fxAll-fx};
 }
-// 체크된 카드 합계: 청구액(입력값)·반영액(eff)·카드정기·카드 비정기
+// 체크된 카드 합계: 청구액(입력값)·반영액(eff)·카드정기(반영분 fx / 전체 fxAll)·카드 비정기·청구액에 없는 정기(cut)
 function cardSums(cards,fixed){
+  const z={bill:0,eff:0,fx:0,fxAll:0,etc:0,cut:0};
   return cards.filter(c=>c.inc!==false).map(c=>cardSplit(c,fixed))
-    .reduce((t,x)=>({bill:t.bill+x.bill,eff:t.eff+x.eff,fx:t.fx+x.fx,etc:t.etc+x.etc}),{bill:0,eff:0,fx:0,etc:0});
+    .reduce((t,x)=>{Object.keys(z).forEach(k=>t[k]+=x[k]);return t;},z);
 }
 function toggleFixed(i){fixed[i].inc=!fxInc(fixed[i]);saveExpData();renderExpAll();}
 // 카드외 비정기 (계좌·현금 일회성)
@@ -1254,13 +1258,13 @@ function renderExpAll(){
   // 카드 리스트 (왼쪽 체크박스로 계산 포함/제외, 정기 포함분·기타분 표시)
   $("cardList").innerHTML=cards.map((c,i)=>{
     const on=c.inc!==false;
-    const {fx:inc,etc,est}=cardSplit(c,fixed);
+    const {fx:inc,fxAll,bill,etc,est,cut}=cardSplit(c,fixed);
     return `<li class="sched-item" draggable="true" style="${on?'':'opacity:.5'}"
       ondragstart="dndStart('card',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('card',${i},this)" ondragend="dndEnd()">
       <span class="drag" title="드래그로 순서 변경">⠿</span>
       <input type="checkbox" ${on?'checked':''} onchange="toggleCard(${i})" title="월 총지출 계산 포함">
       <span class="time">${c.day?c.day+"일":"-"}</span>
-      <span class="txt">${esc(c.name)} <span style="color:var(--muted);font-size:12px">· 정기 ${wonKR(inc)} + 기타 ${wonKR(etc)}${est?` <span style="color:#f5a623" title="청구액이 이 카드 정기지출보다 적어 정기지출 금액으로 계산합니다">(청구액 미입력 · 정기 기준)</span>`:""}</span></span>
+      <span class="txt">${esc(c.name)} <span style="color:var(--muted);font-size:12px">· 정기 ${wonKR(inc)} + 기타 ${wonKR(etc)}${est?` <span style="color:#f5a623" title="청구액을 아직 넣지 않아 이 카드 정기지출 금액으로 계산합니다">(청구액 미입력 · 정기 기준)</span>`:""}${cut>0?` <span style="color:#f5a623" title="청구액을 우선합니다. 정기지출 중 청구되지 않은 몫은 총지출에 넣지 않습니다">(정기 ${wonKR(fxAll)} 중 ${wonKR(bill)}만 청구됨)</span>`:""}</span></span>
       <span class="exp-amt">${wonKR(c.bill)}</span>
       <button class="exp-edit" onclick="editCard(${i})">수정</button>
       <button class="del" onclick="delCard(${i})">✕</button>
@@ -1296,11 +1300,13 @@ function renderExpAll(){
   // 정기지출 합계 = 총지출에 실제로 들어가는 정기분(체크된 카드의 카드정기 + 카드외 정기). 하단 정기지출 박스와 같은 값
   const fixedTotal=cardFixed+nonCardFixed;
   // 체크는 돼 있지만 결제 카드를 계산에서 뺐거나 카드 목록에 없어 합계에 안 들어가는 정기지출
-  const fixedOut=fixed.filter(fxInc).reduce((s,f)=>s+f.amt,0)-fixedTotal;
+  // 체크된 정기지출 중 합계에 안 들어간 몫 = 계산 제외 카드 결제분 + 청구액에 없는 몫(cs.cut)
+  const fixedOut=fixed.filter(fxInc).reduce((s,f)=>s+f.amt,0)-fixedTotal-cs.cut;
   // 정기지출 섹션 상단: 합계 + 카드정기/카드외정기 세부
   $("fixedTotalTop").textContent=wonKR(fixedTotal);
   $("fixedBreakdown").textContent=`카드정기 ${wonKR(cardFixed)} · 카드외 정기 ${wonKR(nonCardFixed)}`
-    +(fixedOut>0?` · 계산 제외 카드 결제분 ${wonKR(fixedOut)}(합계 미포함)`:"");
+    +(fixedOut>0?` · 계산 제외 카드 결제분 ${wonKR(fixedOut)}(합계 미포함)`:"")
+    +(cs.cut>0?` · 청구액에 없는 카드정기 ${wonKR(cs.cut)}(합계 미포함)`:"");
   // 하단 요약: 기타(카드 비정기) + 총지출 합계
   // 총지출 = 카드 청구액(체크분) + 카드외 정기지출 (카드정기는 카드값에 이미 포함 → 중복 방지)
   // 카드외 비정기 목록 (날짜 순)
