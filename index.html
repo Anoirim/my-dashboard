@@ -51,6 +51,8 @@
   .wk-cell .ev{font-size:10px;line-height:1.3;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .wk-cell .ev.done{text-decoration:line-through;color:var(--muted)}
   .wk-cell .ev.more{color:var(--muted)}
+  .wk-cell .ev.g{color:#c77dff} /* 구글 캘린더 일정 */
+  .gtag{font-size:10px;font-weight:700;color:#c77dff;border:1px solid #c77dff;border-radius:4px;padding:0 3px;margin-left:4px}
   .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
   /* 근무 일정 달력 */
   .wk-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
@@ -287,11 +289,24 @@
     <!-- 스케줄러 -->
     <div class="card" data-dept="general">
       <h2><span class="dot" style="background:var(--accent2)"></span>스케줄러</h2>
+      <!-- 구글 캘린더 연동: 연결하면 날짜 있는 일정은 구글 캘린더가 원본이 된다 -->
+      <div class="row" style="align-items:center;margin-bottom:8px;gap:6px">
+        <button class="ghost" id="gcalBtn" onclick="gcalConnect()" style="padding:6px 10px">구글 캘린더 연결</button>
+        <button class="ghost" id="gcalMig" onclick="gcalMigrate()" style="display:none;padding:6px 10px"></button>
+        <span id="gcalState" class="hint" style="margin:0"></span>
+      </div>
+      <details style="margin-bottom:8px"><summary class="hint" style="margin:0;cursor:pointer">구글 캘린더 설정</summary>
+        <div class="row" style="margin-top:6px">
+          <input type="text" id="gcalClientId" placeholder="OAuth 클라이언트 ID (….apps.googleusercontent.com)" style="flex:1">
+          <button onclick="saveGcalClientId()">저장</button>
+        </div>
+      </details>
       <div class="row">
         <input type="date" id="schedDate" style="width:150px">
         <input type="time" id="schedTime" style="width:150px">
         <input type="text" id="schedText" placeholder="할 일 입력" style="flex:1">
-        <button onclick="addSched()">추가</button>
+        <button id="schedAddBtn" onclick="addSched()">추가</button>
+        <button class="ghost" id="schedCancelBtn" onclick="cancelSchedEdit()" style="display:none">취소</button>
       </div>
       <ul class="sched-list" id="schedList"></ul>
     </div>
@@ -805,9 +820,10 @@ function pauseTimer(){
 function resetTimer(){pauseTimer();remain=total;render();}
 render();
 
-/* ===== 스케줄러 (localStorage) =====
+/* ===== 스케줄러 (localStorage + 구글 캘린더) =====
    날짜(date: YYYY-MM-DD)가 있는 일정은 안약 달력에도 병기한다.
-   날짜 기능 이전에 넣은 일정은 date가 없어 목록에만 나온다. */
+   구글 캘린더를 연결하면 날짜 있는 일정은 구글 캘린더가 원본이다(대시보드에 복사해 두지 않는다).
+   날짜 없는 일정과, 연결 전에 넣은 날짜 일정은 localStorage(scheds)에 남는다. */
 let scheds = JSON.parse(localStorage.getItem("scheds")||"[]");
 function saveScheds(){localStorage.setItem("scheds",JSON.stringify(scheds));autoSaveFile();}
 // 날짜 없는 예전 일정이 먼저, 그다음 날짜·시간 순
@@ -817,31 +833,220 @@ function schedDateLabel(ymd){
   const d=new Date(ymd+"T00:00:00");
   return `${d.getMonth()+1}/${d.getDate()}(${"일월화수목금토"[d.getDay()]})`;
 }
+
+/* --- 구글 캘린더 연동 ---
+   브라우저에서 Google Identity Services로 토큰을 받아 Calendar API(primary)를 직접 부른다. 서버를 거치지 않는다.
+   토큰은 약 1시간 유효하고 sessionStorage에만 둔다(localStorage는 백업 파일로 덤프되므로 넣지 않는다).
+   완료 체크는 구글 일정에 항목이 없어 extendedProperties.private.dashDone("1"/"0")에 적는다. */
+const GCAL_SCOPE="https://www.googleapis.com/auth/calendar.events";
+const GCAL_API="https://www.googleapis.com/calendar/v3/calendars/primary/events";
+let gcalEvents=[];          // 화면용으로 펼친 일정 [{id,date,time,text,done,raw}]
+let gcalToken=null, gcalTokenExp=0, gcalClient=null, gcalRange=null, gcalBusy=false;
+try{const t=JSON.parse(sessionStorage.getItem("gcalTok")||"null"); if(t&&t.exp>Date.now()){gcalToken=t.token;gcalTokenExp=t.exp;}}catch(e){}
+const gcalOn=()=>!!gcalToken&&Date.now()<gcalTokenExp;
+let schedEdit=null; // 수정 중인 일정 {src:"l"|"g", key}
+
+function gcalStatus(msg){
+  $("gcalState").textContent=msg||"";
+  $("gcalBtn").textContent=gcalOn()?"새로고침":(gcalToken?"다시 연결":"구글 캘린더 연결");
+  const n=scheds.filter(x=>x.date).length;
+  $("gcalMig").style.display=gcalOn()&&n?"":"none";
+  $("gcalMig").textContent=`기존 날짜 일정 ${n}개 구글로 옮기기`;
+}
+function saveGcalClientId(){
+  localStorage.setItem("gcalClientId",$("gcalClientId").value.trim()); autoSaveFile();
+  gcalClient=null; gcalStatus("클라이언트 ID를 저장했습니다. 연결을 눌러주세요.");
+}
+function gcalLoadLib(){
+  return new Promise((res,rej)=>{
+    if(window.google&&google.accounts&&google.accounts.oauth2)return res();
+    const sc=document.createElement("script"); sc.src="https://accounts.google.com/gsi/client";
+    sc.onload=()=>res(); sc.onerror=()=>rej(new Error("구글 로그인 스크립트를 불러오지 못했습니다"));
+    document.head.appendChild(sc);
+  });
+}
+async function gcalConnect(){
+  if(gcalOn()){gcalRefresh(true);return;} // 연결돼 있으면 버튼은 새로고침
+  const id=(localStorage.getItem("gcalClientId")||"").trim();
+  if(!id){gcalStatus("구글 캘린더 설정에 클라이언트 ID를 먼저 저장하세요.");return;}
+  if(location.protocol==="file:"){gcalStatus("배포 주소(https)에서만 연결할 수 있습니다.");return;}
+  try{await gcalLoadLib();}catch(e){gcalStatus(e.message);return;}
+  if(!gcalClient)gcalClient=google.accounts.oauth2.initTokenClient({client_id:id,scope:GCAL_SCOPE,
+    callback:gcalOnToken, error_callback:e=>gcalStatus("연결이 취소됐거나 실패했습니다"+(e&&e.type?" ("+e.type+")":""))});
+  gcalClient.requestAccessToken({prompt:""}); // 처음 한 번만 동의 화면, 이후에는 창이 잠깐 떴다 닫힌다
+}
+function gcalOnToken(r){
+  if(!r||r.error||!r.access_token){gcalStatus("연결 실패"+(r&&r.error?": "+r.error:""));return;}
+  gcalToken=r.access_token; gcalTokenExp=Date.now()+((r.expires_in||3600)-60)*1000;
+  try{sessionStorage.setItem("gcalTok",JSON.stringify({token:gcalToken,exp:gcalTokenExp}));}catch(e){}
+  gcalRefresh(true);
+}
+async function gcalFetch(method,path,body){
+  if(!gcalOn()){gcalStatus("구글 연결이 만료됐습니다. 다시 연결을 눌러주세요."); throw new Error("not connected");}
+  const r=await fetch(GCAL_API+path,{method,headers:{Authorization:"Bearer "+gcalToken,"Content-Type":"application/json"},
+    body:body?JSON.stringify(body):undefined});
+  if(r.status===401){gcalToken=null;try{sessionStorage.removeItem("gcalTok");}catch(e){} gcalStatus("구글 연결이 만료됐습니다. 다시 연결을 눌러주세요."); throw new Error("401");}
+  if(!r.ok){const t=await r.text().catch(()=>""); gcalStatus("구글 캘린더 오류 "+r.status); throw new Error(t||String(r.status));}
+  return r.status===204?null:r.json();
+}
+// 보는 달(안약 달력) 앞뒤 1주 + 오늘부터 31일을 덮는 구간을 받는다
+function gcalWantRange(){
+  const ymd=d=>d.toLocaleDateString("sv-SE"), today=new Date(); today.setHours(0,0,0,0);
+  const base=(typeof eyeCur!=="undefined")?eyeCur:today;
+  const a=new Date(base.getFullYear(),base.getMonth(),1-7), b=new Date(base.getFullYear(),base.getMonth()+1,7);
+  const t2=new Date(today); t2.setDate(t2.getDate()+31);
+  return {from:ymd(a<today?a:today), to:ymd(b>t2?b:t2)};
+}
+// 구글 일정 시각은 브라우저 시간대와 무관하게 한국 시간으로 읽는다
+const GCAL_TZ="Asia/Seoul";
+const gcalYmd=dt=>new Date(dt).toLocaleDateString("sv-SE",{timeZone:GCAL_TZ});
+const gcalHm=dt=>new Date(dt).toLocaleTimeString("en-GB",{timeZone:GCAL_TZ,hour:"2-digit",minute:"2-digit",hour12:false});
+// 구글 일정 1건 → 화면용 항목. 여러 날 종일 일정은 날마다 한 줄씩 펼친다
+function gcalExpand(ev){
+  const done=((ev.extendedProperties||{}).private||{}).dashDone==="1";
+  const text=ev.summary||"(제목 없음)";
+  if(ev.start&&ev.start.date){
+    const out=[]; let d=new Date(ev.start.date+"T00:00:00"); const end=new Date((ev.end&&ev.end.date||ev.start.date)+"T00:00:00");
+    do{out.push({id:ev.id,date:d.toLocaleDateString("sv-SE"),time:"",text,done,raw:ev}); d.setDate(d.getDate()+1);}while(d<end&&out.length<62);
+    return out;
+  }
+  const st=ev.start&&ev.start.dateTime; if(!st)return [];
+  return [{id:ev.id,date:gcalYmd(st),time:gcalHm(st),text,done,raw:ev}];
+}
+async function gcalRefresh(force){
+  if(!gcalOn()){gcalStatus(gcalToken?"구글 연결이 만료됐습니다. 다시 연결을 눌러주세요.":"");return;}
+  if(gcalBusy)return; gcalBusy=true;
+  const rg=gcalWantRange();
+  try{
+    const items=[]; let page="";
+    do{
+      const q=`?singleEvents=true&orderBy=startTime&maxResults=250&timeMin=${encodeURIComponent(new Date(rg.from+"T00:00:00").toISOString())}`
+        +`&timeMax=${encodeURIComponent(new Date(rg.to+"T23:59:59").toISOString())}`+(page?"&pageToken="+encodeURIComponent(page):"");
+      const j=await gcalFetch("GET",q); (j.items||[]).forEach(e=>{if(e.status!=="cancelled")items.push(e);}); page=j.nextPageToken||"";
+    }while(page);
+    gcalEvents=items.flatMap(gcalExpand); gcalRange=rg;
+    gcalStatus("연결됨 · "+new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})+" 갱신");
+  }catch(e){}
+  finally{gcalBusy=false;}
+  renderScheds(); if(typeof eyeCur!=="undefined")renderEye();
+}
+// 시간 있는 일정은 기존 길이를 유지하고(새 일정은 1시간), 시간이 없으면 종일 일정으로 만든다
+function gcalWhen(date,time,raw){
+  if(!time){const n=new Date(date+"T00:00:00");n.setDate(n.getDate()+1);return {start:{date},end:{date:n.toLocaleDateString("sv-SE")}};}
+  let dur=3600000;
+  if(raw&&raw.start&&raw.start.dateTime&&raw.end&&raw.end.dateTime)dur=Math.max(0,new Date(raw.end.dateTime)-new Date(raw.start.dateTime));
+  // 날짜·시각 문자열을 그대로 한국 시간으로 보내므로, 끝 시각은 시간대 없이 UTC 계산으로 더한다
+  const [y,mo,d]=date.split("-").map(Number), [h,mi]=time.split(":").map(Number);
+  const st=Date.UTC(y,mo-1,d,h,mi), en=new Date(st+dur), p2=n=>String(n).padStart(2,"0");
+  const f=t=>{const x=new Date(t);return `${x.getUTCFullYear()}-${p2(x.getUTCMonth()+1)}-${p2(x.getUTCDate())}T${p2(x.getUTCHours())}:${p2(x.getUTCMinutes())}:00`;};
+  return {start:{dateTime:f(st),timeZone:GCAL_TZ},end:{dateTime:f(en),timeZone:GCAL_TZ}};
+}
+const gcalPriv=(raw,patch)=>({private:Object.assign({},((raw&&raw.extendedProperties)||{}).private||{},patch)});
+async function gcalCreate(date,time,text,done){
+  return gcalFetch("POST","",Object.assign({summary:text,extendedProperties:{private:{dash:"1",dashDone:done?"1":"0"}}},gcalWhen(date,time)));
+}
+// 연결 전에 넣어 둔 날짜 일정을 구글로 옮긴다. 성공한 것만 대시보드에서 지운다
+async function gcalMigrate(){
+  const list=scheds.filter(x=>x.date);
+  if(!list.length||!confirm(`날짜 있는 일정 ${list.length}개를 구글 캘린더로 옮깁니다. 옮긴 뒤에는 구글 캘린더가 원본이 됩니다.`))return;
+  let ok=0;
+  for(const x of list){ try{await gcalCreate(x.date,x.time,x.text,x.done); scheds.splice(scheds.indexOf(x),1); ok++;}catch(e){break;} }
+  saveScheds(); gcalStatus(`${ok}개 옮김`); gcalRefresh(true);
+}
+const gcalFind=id=>gcalEvents.find(e=>e.id===id);
+
+/* --- 일정 목록(로컬 + 구글) --- */
+// 그날 일정: 로컬(날짜 있는 예전 일정) + 구글
+function dayItems(ymd){
+  const l=scheds.map((x,i)=>({src:"l",key:i,date:x.date,time:x.time,text:x.text,done:x.done})).filter(x=>x.date===ymd);
+  const g=gcalEvents.filter(e=>e.date===ymd).map(e=>({src:"g",key:e.id,date:e.date,time:e.time,text:e.text,done:e.done}));
+  return l.concat(g).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+}
+// full=스케줄러 목록(날짜·수정·삭제 버튼), 아니면 안약 달력의 좁은 패널(이름을 누르면 스케줄러에서 수정)
+function schedItemHtml(it,full){
+  const k=it.src==="l"?it.key:`'${it.key}'`;
+  const name=`${it.text.replace(/</g,'&lt;')}${it.src==="g"?'<span class="gtag" title="구글 캘린더 일정">G</span>':''}`;
+  return `<li class="sched-item ${it.done?'done':''}">
+      <input type="checkbox" ${it.done?'checked':''} onchange="itemToggle('${it.src}',${k})">
+      ${full?`<span class="sdate">${schedDateLabel(it.date)}</span>`:""}
+      <span class="time">${it.time||''}</span>
+      ${full?`<span class="txt">${name}</span>
+      <button class="exp-edit" onclick="itemEdit('${it.src}',${k})">수정</button>
+      <button class="del" onclick="itemDel('${it.src}',${k})">✕</button>`
+      :`<span class="txt" style="cursor:pointer" title="누르면 스케줄러 입력칸에서 고칠 수 있습니다" onclick="itemEdit('${it.src}',${k})">${name}</span>`}
+    </li>`;
+}
 function renderScheds(){
   sortScheds();
-  $("schedList").innerHTML = scheds.map((s,i)=>`
-    <li class="sched-item ${s.done?'done':''}">
-      <input type="checkbox" ${s.done?'checked':''} onchange="toggleSched(${i})">
-      <span class="sdate">${schedDateLabel(s.date)}</span>
-      <span class="time">${s.time||''}</span>
-      <span class="txt">${s.text.replace(/</g,'&lt;')}</span>
-      <button class="del" onclick="delSched(${i})">✕</button>
-    </li>`).join("") || '<div class="hint">등록된 일정이 없습니다.</div>';
+  const today=new Date().toLocaleDateString("sv-SE");
+  // 구글 일정은 오늘 이후만 목록에 둔다(지난 일정은 달력에서 본다). 같은 일정의 여러 날 줄은 첫 줄만
+  const seen=new Set();
+  const g=gcalEvents.filter(e=>e.date>=today&&!seen.has(e.id)&&seen.add(e.id))
+    .map(e=>({src:"g",key:e.id,date:e.date,time:e.time,text:e.text,done:e.done}));
+  const l=scheds.map((x,i)=>({src:"l",key:i,date:x.date,time:x.time,text:x.text,done:x.done}));
+  const all=l.concat(g).sort((a,b)=>((a.date||"")+(a.time||"")).localeCompare((b.date||"")+(b.time||"")));
+  $("schedList").innerHTML=all.map(it=>schedItemHtml(it,true)).join("")||'<div class="hint">등록된 일정이 없습니다.</div>';
+  if(typeof gcalStatus==="function"&&$("gcalState"))gcalStatus($("gcalState").textContent);
 }
 // 스케줄이 바뀌면 안약 달력의 병기도 함께 다시 그린다
 function schedChanged(){saveScheds();renderScheds();renderEye();}
-function addSched(){
-  const text=$("schedText").value.trim();if(!text)return;
-  scheds.push({date:$("schedDate").value,time:$("schedTime").value,text,done:false});
-  // 같은 날 일정을 이어 넣기 쉽도록 날짜는 남긴다
-  $("schedText").value="";$("schedTime").value="";
-  schedChanged();
+function resetSchedInput(){
+  $("schedText").value="";$("schedTime").value=""; // 같은 날 일정을 이어 넣기 쉽도록 날짜는 남긴다
+  schedEdit=null; $("schedAddBtn").textContent="추가"; $("schedCancelBtn").style.display="none";
 }
-function toggleSched(i){scheds[i].done=!scheds[i].done;schedChanged();}
-function delSched(i){scheds.splice(i,1);schedChanged();}
+function cancelSchedEdit(){resetSchedInput();}
+async function addSched(){
+  const text=$("schedText").value.trim();if(!text)return;
+  const date=$("schedDate").value, time=$("schedTime").value, ed=schedEdit;
+  try{
+    if(ed&&ed.src==="g"){ // 구글 일정 수정
+      const e=gcalFind(ed.key); if(!e)return resetSchedInput();
+      if(!date){alert("구글 일정은 날짜가 있어야 합니다.");return;}
+      await gcalFetch("PATCH","/"+encodeURIComponent(ed.key),Object.assign({summary:text},gcalWhen(date,time,e.raw)));
+      resetSchedInput(); return gcalRefresh(true);
+    }
+    if(ed&&ed.src==="l"){ // 로컬 일정 수정. 연결 중에 날짜를 넣으면 구글로 옮긴다
+      const x=scheds[ed.key];
+      if(date&&gcalOn()){await gcalCreate(date,time,text,x.done); scheds.splice(ed.key,1); resetSchedInput(); saveScheds(); return gcalRefresh(true);}
+      Object.assign(x,{date,time,text}); resetSchedInput(); return schedChanged();
+    }
+    if(date&&gcalOn()){await gcalCreate(date,time,text,false); resetSchedInput(); return gcalRefresh(true);}
+    scheds.push({date,time,text,done:false}); resetSchedInput(); schedChanged();
+  }catch(e){alert("구글 캘린더에 저장하지 못했습니다. 연결 상태를 확인해 주세요.");}
+}
+async function itemToggle(src,key){
+  if(src==="l"){scheds[key].done=!scheds[key].done;return schedChanged();}
+  const e=gcalFind(key); if(!e)return;
+  const done=!e.done;
+  gcalEvents.forEach(x=>{if(x.id===key)x.done=done;}); renderScheds(); renderEye(); // 먼저 화면에 반영
+  try{await gcalFetch("PATCH","/"+encodeURIComponent(key),{extendedProperties:gcalPriv(e.raw,{dashDone:done?"1":"0"})});}
+  catch(err){} gcalRefresh(true);
+}
+function itemEdit(src,key){
+  const it=src==="l"?scheds[key]:gcalFind(key); if(!it)return;
+  if(curDept!=="general")switchDept("general");
+  $("schedText").scrollIntoView({block:"center"});
+  $("schedDate").value=it.date||""; $("schedTime").value=it.time||""; $("schedText").value=it.text;
+  schedEdit={src,key}; $("schedAddBtn").textContent="저장"; $("schedCancelBtn").style.display="";
+  $("schedText").focus();
+}
+async function itemDel(src,key){
+  if(src==="l"){scheds.splice(key,1);return schedChanged();}
+  const e=gcalFind(key); if(!e)return;
+  if(!confirm(`"${e.text}" 일정을 구글 캘린더에서 삭제합니다.`))return;
+  try{await gcalFetch("DELETE","/"+encodeURIComponent(key));}catch(err){}
+  gcalRefresh(true);
+}
+// 예전 이름 호환(다른 곳에서 부르는 로컬 일정 함수)
+function toggleSched(i){itemToggle("l",i);}
+function delSched(i){itemDel("l",i);}
 $("schedText").addEventListener("keydown",e=>{if(e.key==="Enter")addSched();});
 $("schedDate").value=new Date().toLocaleDateString("sv-SE");
+$("gcalClientId").value=localStorage.getItem("gcalClientId")||"";
 renderScheds();
+// 연결돼 있으면 5분마다, 그리고 탭으로 돌아올 때 다시 읽는다(구글에서 고친 내용 반영)
+setInterval(()=>{if(gcalOn()&&!document.hidden)gcalRefresh();},5*60*1000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&gcalOn())gcalRefresh();});
 
 /* ===== 식품 재고 (폐기 감소 목적: 위험한 것부터 보여준다) ===== */
 // days=null 이면 유통기한을 직접 입력받는 유형이다.
@@ -999,17 +1204,18 @@ function eyeMove(n){
   else eyeCur=new Date(eyeCur.getFullYear(),eyeCur.getMonth()+n,1);
   eyeCur.setDate(1);
   renderEye();
+  // 받아 둔 구간 밖의 달로 가면 구글 일정을 다시 받는다
+  const w=gcalWantRange(); if(gcalOn()&&(!gcalRange||w.from<gcalRange.from||w.to>gcalRange.to))gcalRefresh();
 }
 // 미래 날짜도 일정 확인용으로 고를 수 있다. 복용 기록은 패널에서 막는다
 function selectEyeDay(ymd){ eyeSel=ymd; renderEye(); }
-function schedsOn(ymd){return scheds.map((s,i)=>({s,i})).filter(x=>x.s.date===ymd);}
-// 달력 칸에 넣을 일정 줄. 칸이 좁아 2개까지만 쓰고 나머지는 +N으로 줄인다
+// 달력 칸에 넣을 일정 줄(로컬 파랑, 구글 보라). 칸이 좁아 2개까지만 쓰고 나머지는 +N으로 줄인다
 function eyeSchedMarks(ymd){
-  const list=schedsOn(ymd);
+  const list=dayItems(ymd);
   const tip=t=>t.replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
-  return list.slice(0,2).map(({s})=>{
+  return list.slice(0,2).map(s=>{
     const t=(s.time?s.time+" ":"")+s.text;
-    return `<div class="ev ${s.done?'done':''}" title="${tip(t)}">${t.replace(/</g,"&lt;")}</div>`;
+    return `<div class="ev ${s.done?'done':''} ${s.src==='g'?'g':''}" title="${tip(t)}">${t.replace(/</g,"&lt;")}</div>`;
   }).join("")+(list.length>2?`<div class="ev more">+${list.length-2}</div>`:"");
 }
 // 패널의 "이 날짜로 일정 추가": 스케줄러 입력칸에 날짜를 넣고 할 일 칸으로 보낸다
@@ -1072,14 +1278,9 @@ function renderEye(){
     </div>
     <button class="ghost" style="margin-top:12px;width:100%" onclick="resetEye()">이 날 기록 초기화</button>`}
     <div style="font-size:13px;color:var(--muted);margin:14px 0 6px">일정</div>
-    <ul class="sched-list" style="margin-top:0">${schedsOn(eyeSel).map(({s,i})=>`
-      <li class="sched-item ${s.done?'done':''}">
-        <input type="checkbox" ${s.done?'checked':''} onchange="toggleSched(${i})">
-        <span class="time">${s.time||''}</span>
-        <span class="txt">${s.text.replace(/</g,'&lt;')}</span>
-      </li>`).join("")||'<div class="hint" style="margin:0">이 날 일정이 없습니다.</div>'}</ul>
+    <ul class="sched-list" style="margin-top:0">${dayItems(eyeSel).map(it=>schedItemHtml(it,false)).join("")||'<div class="hint" style="margin:0">이 날 일정이 없습니다.</div>'}</ul>
     <button class="ghost" style="margin-top:8px;width:100%" onclick="addSchedOn('${eyeSel}')">이 날짜로 일정 추가</button>`;
-  $("eyeNote").textContent="날짜를 누르면 그 날 기록을 고칠 수 있습니다. 링이 꽉 차면 그날 4회를 모두 넣은 것입니다. 파란 글씨는 스케줄러의 그날 일정입니다(날짜 없이 넣은 예전 일정은 표시되지 않음).";
+  $("eyeNote").textContent="날짜를 누르면 그 날 기록을 고칠 수 있습니다. 링이 꽉 차면 그날 4회를 모두 넣은 것입니다. 파란 글씨는 스케줄러 일정, 보라 글씨는 구글 캘린더 일정입니다(날짜 없이 넣은 일정은 표시되지 않음).";
 }
 renderEye();
 
@@ -3269,6 +3470,8 @@ function applyNewDay(prev){
   if(mkYmd(wkCur).slice(0,7)===prev.slice(0,7))wkCur=firstOfThisMonth();
 
   renderEye();renderWork();renderFoods();renderMarketCal();renderPickup();
+  renderScheds(); // 구글 일정 목록은 '오늘 이후'만 보여주므로 날이 바뀌면 다시 그린다
+  if(gcalOn())gcalRefresh();
 }
 function checkDayChange(){
   const today=new Date().toLocaleDateString("sv-SE");
@@ -3293,6 +3496,8 @@ function switchDept(d){
   autoSaveFile(); // 선택 탭도 localStorage에 있으니 파일 미러에 반영 (초기화 시엔 fileHandle 없어 무해)
 }
 switchDept(localStorage.getItem("curDept")||"fin");
+// 같은 탭에서 새로고침했고 구글 토큰이 아직 유효하면 바로 다시 읽는다
+gcalStatus(""); if(gcalOn())gcalRefresh();
 
 /* ===== 자동 기록 초기화 (마지막에 실행) ===== */
 $("apiKey").addEventListener("change",()=>autoSaveFile());
