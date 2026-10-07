@@ -559,6 +559,21 @@
       </div>
       <ul class="sched-list" id="fxList" style="margin-top:0;max-height:480px"></ul>
 
+      <div class="exp-divider"></div>
+
+      <!-- 카드외 비정기: 계좌이체·현금으로 낸 일회성 지출. 그달에만 해당해 새 달로 이월하지 않는다 -->
+      <div class="exp-label" style="display:flex;justify-content:space-between;align-items:center">
+        <span>💸 카드외 비정기 지출 (계좌·현금 일회성)</span>
+        <span>합계 <b id="oneoffTotalTop" style="color:#f5a623;font-size:16px">0원</b></span>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <input type="number" id="ooDay" min="1" max="31" placeholder="날짜" style="width:80px">
+        <input type="text" id="ooName" placeholder="항목명 (예: 경조사비, 병원비)" style="flex:1">
+        <input type="number" id="ooAmt" placeholder="금액(원)" style="width:120px">
+        <button onclick="addOneoff()">추가</button>
+      </div>
+      <ul class="sched-list" id="ooList" style="margin-top:0;max-height:334px"></ul>
+
       <div class="exp-sum" id="expSum" style="margin-top:16px"></div>
       <!-- 보유금액으로 그달 총지출을 감당할 수 있는지 -->
       <div class="row" style="align-items:center;margin:0 0 8px">
@@ -567,7 +582,7 @@
           oninput="fmtExpCash(this);renderExpCash()" onchange="setExpCash(this.value)" title="이 달 총지출과 비교합니다. 달마다 따로 저장됩니다.">
         <span id="expCashMsg" style="font-size:14px;font-weight:600"></span>
       </div>
-      <div class="hint">월 총지출 = 카드 청구액 합계 + 카드 외(계좌·현금) 정기지출. 카드로 내는 정기지출은 카드값에 이미 포함돼 중복 계산되지 않습니다.</div>
+      <div class="hint">월 총지출 = 카드 청구액 합계 + 카드 외(계좌·현금) 정기지출 + 카드외 비정기 지출. 카드로 내는 정기지출은 카드값에 이미 포함돼 중복 계산되지 않습니다.</div>
 
       <div class="exp-divider"></div>
       <div class="exp-label" style="display:flex;justify-content:space-between;align-items:center">
@@ -1066,7 +1081,7 @@ const wonKR=n=>Math.round(n).toLocaleString("ko-KR")+"원";
 const esc=s=>s.replace(/</g,"&lt;");
 let expData=JSON.parse(localStorage.getItem("expData")||"{}");
 let curMonth=localStorage.getItem("curMonth")||new Date().toISOString().slice(0,7); // YYYY-MM
-let cards=[], fixed=[];
+let cards=[], fixed=[], oneoff=[]; // oneoff: 카드외 비정기 [{day,name,amt,inc}]
 let fxEditInc=true; // 정기지출 수정 시 체크 상태를 유지하기 위한 임시 보관
 
 // 기존(월 구분 없던) 데이터 이월
@@ -1078,7 +1093,7 @@ if(!expData[curMonth] && (localStorage.getItem("cards")||localStorage.getItem("f
   localStorage.setItem("expData",JSON.stringify(expData));
 }
 // cards·fixed 외의 월별 값(보유금액 cash)이 지워지지 않도록 덮어쓰지 않고 합친다
-function saveExpData(){expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed});localStorage.setItem("expData",JSON.stringify(expData));autoSaveFile();}
+function saveExpData(){expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed,oneoff});localStorage.setItem("expData",JSON.stringify(expData));autoSaveFile();}
 // 보유금액: 그달에만 해당하는 값이라 새 달로 이월하지 않는다(loadMonth의 신규 월은 cards·fixed만 만든다)
 let expGrandTotal=0, expCashMonth=null;
 // 입력칸은 자릿수 쉼표를 보여주므로 숫자만 골라 읽는다. 비어 있으면 null
@@ -1092,7 +1107,7 @@ function fmtExpCash(el){
   el.setSelectionRange(i,i);
 }
 function setExpCash(v){
-  const n=cashNum(v), d=expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed});
+  const n=cashNum(v), d=expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed,oneoff});
   if(n!=null)d.cash=n; else delete d.cash;
   saveExpData();
   renderExpCash();
@@ -1109,7 +1124,7 @@ function renderExpCash(){
 function loadMonth(m){
   if(!m)return;
   curMonth=m; localStorage.setItem("curMonth",m);
-  if(expData[m]){cards=expData[m].cards; fixed=expData[m].fixed; autoSaveFile();} // curMonth 변경을 미러 (신규 월은 아래 saveExpData가 커버)
+  if(expData[m]){cards=expData[m].cards; fixed=expData[m].fixed; oneoff=expData[m].oneoff||[]; autoSaveFile();} // curMonth 변경을 미러 (신규 월은 아래 saveExpData가 커버)
   else{
     // 직전(가장 최근 이전) 달에서 정기지출·카드 이월 (청구액은 0으로 초기화)
     const prev=Object.keys(expData).filter(k=>k<m).sort().pop();
@@ -1118,6 +1133,7 @@ function loadMonth(m){
       // 체크 해제는 그 달에만 적용되는 판단이므로, 새 달로 넘어올 때는 다시 포함으로 시작한다
       fixed=JSON.parse(JSON.stringify(expData[prev].fixed)).map(f=>Object.assign(f,{inc:true}));
     }else{cards=[];fixed=[];}
+    oneoff=[]; // 카드외 비정기는 그달 일회성이라 이월하지 않는다
     saveExpData();
   }
   $("monthSel").value=curMonth;
@@ -1157,6 +1173,17 @@ function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
 // 체크를 끄면 그 달 합계·카드 정기분에서 빠진다. 값이 없는 기존 데이터는 포함으로 본다.
 const fxInc=f=>f.inc!==false;
 function toggleFixed(i){fixed[i].inc=!fxInc(fixed[i]);saveExpData();renderExpAll();}
+// 카드외 비정기 (계좌·현금 일회성)
+function addOneoff(){
+  const name=$("ooName").value.trim(), amt=parseFloat($("ooAmt").value)||0, day=parseInt($("ooDay").value)||0;
+  if(!name||!(amt>0))return;
+  oneoff.push({day,name,amt,inc:true});
+  $("ooName").value="";$("ooAmt").value="";$("ooDay").value="";
+  saveExpData();renderExpAll();
+}
+function editOneoff(i){const o=oneoff[i];$("ooName").value=o.name;$("ooAmt").value=o.amt;$("ooDay").value=o.day||"";oneoff.splice(i,1);saveExpData();renderExpAll();}
+function delOneoff(i){oneoff.splice(i,1);saveExpData();renderExpAll();}
+function toggleOneoff(i){oneoff[i].inc=oneoff[i].inc===false;saveExpData();renderExpAll();}
 
 function buildMethodOptions(sel){
   const opts=["계좌/현금",...cards.map(c=>c.name)];
@@ -1247,9 +1274,25 @@ function renderExpAll(){
   $("fixedBreakdown").textContent=`카드정기 ${wonKR(cardFixed)} · 카드외 정기 ${wonKR(nonCardFixed)}`;
   // 하단 요약: 기타(카드 비정기) + 총지출 합계
   // 총지출 = 카드 청구액(체크분) + 카드외 정기지출 (카드정기는 카드값에 이미 포함 → 중복 방지)
-  const grandTotal=cardTotal+nonCardFixed;
+  // 카드외 비정기 목록 (날짜 순)
+  const ooOrder=[...oneoff.keys()].sort((a,b)=>((oneoff[a].day||99)-(oneoff[b].day||99)));
+  $("ooList").innerHTML=ooOrder.map(i=>{const o=oneoff[i];const on=o.inc!==false;
+    return `<li class="sched-item" style="${on?'':'opacity:.5'}">
+      <input type="checkbox" ${on?'checked':''} onchange="toggleOneoff(${i})" title="이 달 계산에 포함">
+      <span class="time">${o.day?o.day+"일":"-"}</span>
+      <span class="txt">${esc(o.name)}</span>
+      <span class="exp-amt">${wonKR(o.amt)}</span>
+      <button class="exp-edit" onclick="editOneoff(${i})">수정</button>
+      <button class="del" onclick="delOneoff(${i})">✕</button>
+    </li>`;
+  }).join("")||'<div class="hint">등록된 카드외 비정기 지출이 없습니다.</div>';
+  const nonCardEtc=oneoff.filter(o=>o.inc!==false).reduce((s,o)=>s+(o.amt||0),0);
+  $("oneoffTotalTop").textContent=wonKR(nonCardEtc);
+  // 총지출 = 카드 청구액 + 카드외 정기 + 카드외 비정기
+  const grandTotal=cardTotal+nonCardFixed+nonCardEtc;
   $("expSum").innerHTML=`
-    <div class="exp-box"><div class="lbl">기타(카드 비정기)</div><div class="num">${wonKR(cardEtc)}</div></div>
+    <div class="exp-box"><div class="lbl">기타(비정기)</div><div class="num">${wonKR(cardEtc+nonCardEtc)}</div>
+      <div class="lbl" style="margin:4px 0 0">카드 비정기 ${wonKR(cardEtc)} · 카드외 비정기 ${wonKR(nonCardEtc)}</div></div>
     <div class="exp-box total"><div class="lbl">${curMonth} 총지출 합계</div><div class="num">${wonKR(grandTotal)}</div></div>`;
   expGrandTotal=grandTotal;
   // 달이 바뀌면 그달 저장값으로 채운다. 같은 달에서는 입력 중인 값을 덮어쓰지 않는다
@@ -1262,13 +1305,14 @@ function renderExpAll(){
 let expChart=null;
 // renderExpAll과 같은 기준. 카드로 내는 정기지출은 카드값에 포함돼 총지출에서 중복 계산하지 않는다.
 function monthTotals(m){
-  const d=expData[m]||{}, cards=d.cards||[], fixed=d.fixed||[];
+  const d=expData[m]||{}, cards=d.cards||[], fixed=d.fixed||[], oneoff=d.oneoff||[];
   const cardTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>s+(c.bill||0),0);
   const names=new Set(cards.filter(c=>c.inc!==false).map(c=>c.name));
   const cardFixed=fixed.filter(f=>fxInc(f)&&names.has(f.method)).reduce((s,f)=>s+(f.amt||0),0);
   const nonCardFixed=fixed.filter(f=>fxInc(f)&&f.method==="계좌/현금").reduce((s,f)=>s+(f.amt||0),0);
-  return {card:cardTotal,fixed:cardFixed+nonCardFixed,etc:cardTotal-cardFixed,
-    cardFixed,nonCardFixed,total:cardTotal+nonCardFixed};
+  const nonCardEtc=oneoff.filter(o=>o.inc!==false).reduce((s,o)=>s+(o.amt||0),0);
+  return {card:cardTotal,fixed:cardFixed+nonCardFixed,etc:cardTotal-cardFixed+nonCardEtc,
+    cardFixed,nonCardFixed,cardEtc:cardTotal-cardFixed,nonCardEtc,total:cardTotal+nonCardFixed+nonCardEtc};
 }
 function renderExpChart(){
   if(!$("expChart"))return;
@@ -1297,7 +1341,7 @@ function renderExpChart(){
     plugins:[totalLabels],
     data:{labels:months,datasets:[
       {label:"정기지출",data:t.map(x=>x.fixed),backgroundColor:"#4f8cff",stack:"s",borderRadius:4},
-      {label:"기타(카드 비정기)",data:t.map(x=>x.etc),backgroundColor:"#ff8fab",stack:"s",borderRadius:4}
+      {label:"기타(비정기)",data:t.map(x=>x.etc),backgroundColor:"#ff8fab",stack:"s",borderRadius:4}
     ]},
     options:{
       interaction:{mode:"index",intersect:false},
@@ -1308,7 +1352,7 @@ function renderExpChart(){
           callbacks:{
             label:c=>" "+c.dataset.label+" "+wonKR(c.parsed.y),
             footer:it=>{const x=t[it[0].dataIndex];
-              return "총지출 "+wonKR(x.total)+"\n카드값 "+wonKR(x.card)+" (정기 "+wonKR(x.cardFixed)+")\n카드외 정기 "+wonKR(x.nonCardFixed);}
+              return "총지출 "+wonKR(x.total)+"\n카드값 "+wonKR(x.card)+" (정기 "+wonKR(x.cardFixed)+")\n카드외 정기 "+wonKR(x.nonCardFixed)+" · 카드외 비정기 "+wonKR(x.nonCardEtc);}
           }}
       },
       // grace: 가장 높은 막대 위에도 합계 숫자가 들어갈 여유(범례와 겹치지 않게)
@@ -1320,6 +1364,7 @@ function renderExpChart(){
   $("expChartNote").innerHTML=`${months.length}개월 · 평균 ${wonKR(avg)} · 최대 ${wonKR(max)}(${months[tot.indexOf(max)]}) · 최소 ${wonKR(min)}(${months[tot.indexOf(min)]})`;
 }
 $("cardBill").addEventListener("keydown",e=>{if(e.key==="Enter")addCard();});
+["ooName","ooAmt"].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")addOneoff();}));
 $("fxAmt").addEventListener("keydown",e=>{if(e.key==="Enter")addFixed();});
 loadMonth(curMonth);
 
