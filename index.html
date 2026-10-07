@@ -578,8 +578,12 @@
       <!-- 보유금액으로 그달 총지출을 감당할 수 있는지 -->
       <div class="row" style="align-items:center;margin:0 0 8px">
         <span style="font-size:13px;color:var(--muted)">현재 보유금액</span>
-        <input type="text" inputmode="numeric" id="expCash" placeholder="보유금액(원)" style="width:170px;text-align:right"
-          oninput="fmtExpCash(this);renderExpCash()" onchange="setExpCash(this.value)" title="이 달 총지출과 비교합니다. 달마다 따로 저장됩니다.">
+        <span style="font-size:13px">통장</span>
+        <input type="text" inputmode="numeric" id="expCash" placeholder="통장(원)" style="width:150px;text-align:right"
+          oninput="fmtExpCash(this);renderExpCash()" onchange="setExpCash('cash',this.value)" title="통장 잔액. 이 달 총지출과 비교합니다. 달마다 따로 저장됩니다.">
+        <span style="font-size:13px">+ 현금</span>
+        <input type="text" inputmode="numeric" id="expCashHand" placeholder="현금(원)" style="width:130px;text-align:right"
+          oninput="fmtExpCash(this);renderExpCash()" onchange="setExpCash('cashHand',this.value)" title="가지고 있는 현금. 이 달 총지출과 비교합니다. 달마다 따로 저장됩니다.">
         <span id="expCashMsg" style="font-size:14px;font-weight:600"></span>
       </div>
       <div class="hint">월 총지출 = 카드 청구액 합계 + 카드 외(계좌·현금) 정기지출 + 카드외 비정기 지출. 카드로 내는 정기지출은 카드값에 이미 포함돼 중복 계산되지 않습니다.</div>
@@ -1095,6 +1099,8 @@ if(!expData[curMonth] && (localStorage.getItem("cards")||localStorage.getItem("f
 // cards·fixed 외의 월별 값(보유금액 cash)이 지워지지 않도록 덮어쓰지 않고 합친다
 function saveExpData(){expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed,oneoff});localStorage.setItem("expData",JSON.stringify(expData));autoSaveFile();}
 // 보유금액: 그달에만 해당하는 값이라 새 달로 이월하지 않는다(loadMonth의 신규 월은 cards·fixed만 만든다)
+// 통장은 cash, 현금은 cashHand에 저장한다(예전에 넣은 cash는 그대로 통장 값으로 읽힌다)
+const EXP_CASH_IN={cash:"expCash",cashHand:"expCashHand"};
 let expGrandTotal=0, expCashMonth=null;
 // 입력칸은 자릿수 쉼표를 보여주므로 숫자만 골라 읽는다. 비어 있으면 null
 const cashNum=v=>{const d=String(v||"").replace(/[^0-9]/g,"");return d===""?null:Number(d);};
@@ -1106,19 +1112,19 @@ function fmtExpCash(el){
   let i=0,seen=0; while(i<out.length&&seen<before){if(/[0-9]/.test(out[i]))seen++;i++;}
   el.setSelectionRange(i,i);
 }
-function setExpCash(v){
+function setExpCash(key,v){
   const n=cashNum(v), d=expData[curMonth]=Object.assign({},expData[curMonth],{cards,fixed,oneoff});
-  if(n!=null)d.cash=n; else delete d.cash;
+  if(n!=null)d[key]=n; else delete d[key];
   saveExpData();
   renderExpCash();
 }
 function renderExpCash(){
-  const n=cashNum($("expCash").value);
-  if(n==null){$("expCashMsg").innerHTML=`<span style="color:var(--muted);font-weight:400;font-size:12px">입력하면 총지출 대비 여유·부족을 알려줍니다</span>`;return;}
-  const diff=n-expGrandTotal;
-  $("expCashMsg").innerHTML=diff>=0
+  const bank=cashNum($("expCash").value), hand=cashNum($("expCashHand").value);
+  if(bank==null&&hand==null){$("expCashMsg").innerHTML=`<span style="color:var(--muted);font-weight:400;font-size:12px">입력하면 총지출 대비 여유·부족을 알려줍니다</span>`;return;}
+  const n=(bank||0)+(hand||0), diff=n-expGrandTotal;
+  $("expCashMsg").innerHTML=`<span style="font-weight:400">= ${wonKR(n)}</span> · `+(diff>=0
     ?`<span class="up">총지출 ${wonKR(expGrandTotal)} 대비 ${wonKR(diff)} 여유</span>`
-    :`<span class="down">총지출 ${wonKR(expGrandTotal)} 대비 ${wonKR(-diff)} 부족</span>`;
+    :`<span class="down">총지출 ${wonKR(expGrandTotal)} 대비 ${wonKR(-diff)} 부족</span>`);
 }
 
 function loadMonth(m){
@@ -1308,7 +1314,9 @@ function renderExpAll(){
     <div class="exp-box total"><div class="lbl">${curMonth} 총지출 합계</div><div class="num">${wonKR(grandTotal)}</div></div>`;
   expGrandTotal=grandTotal;
   // 달이 바뀌면 그달 저장값으로 채운다. 같은 달에서는 입력 중인 값을 덮어쓰지 않는다
-  if(expCashMonth!==curMonth||document.activeElement!==$("expCash")){const c=(expData[curMonth]||{}).cash; $("expCash").value=c!=null?c.toLocaleString("ko-KR"):"";}
+  Object.entries(EXP_CASH_IN).forEach(([key,id])=>{
+    if(expCashMonth!==curMonth||document.activeElement!==$(id)){const c=(expData[curMonth]||{})[key]; $(id).value=c!=null?c.toLocaleString("ko-KR"):"";}
+  });
   expCashMonth=curMonth;
   renderExpCash();
   renderExpChart();
