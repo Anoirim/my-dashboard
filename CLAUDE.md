@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 개인용 웹 대시보드. 빌드 시스템·패키지 매니저·테스트 프레임워크가 **없다**. `package.json`, `vercel.json` 모두 없으며 Vercel의 zero-config가 `api/` 디렉터리를 서버리스 함수로 자동 인식한다.
 
-- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,100줄). Chart.js만 CDN(cdnjs) 로드
+- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,200줄). Chart.js만 CDN(cdnjs) 로드
 - `api/kis.js` — KIS(한국투자증권) OpenAPI 프록시 + 한국은행 ECOS·Google 뉴스 RSS 중계. CommonJS 핸들러 1개 (약 600줄)
 
 줄 수가 계속 늘고 있으므로 위치는 줄 번호가 아니라 **함수명·블록 주석으로 찾을 것**.
@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **배포**: `main`에 push → Vercel 자동 배포(1-2분) → 브라우저 Ctrl+Shift+R. 빌드 단계 없음
   - 클라우드 세션에서는 작업 브랜치에 push한 뒤, 사용자가 "승인"하면 PR을 만들어 `main`에 rebase 머지하는 방식으로 배포한다
 - **로컬 확인**: `index.html`을 브라우저로 직접 열면 UI·타이머·지출·해외주식은 동작하지만, `/api/kis` 프록시가 없어 **국내 주식·계좌 조회는 실패**한다. File System Access 자동저장도 `file://`에서 차단된다(`setFileState` 근처의 `location.protocol==="file:"` 분기)
-- **Chart.js 의존**: CDN 로드가 실패하면 첫 `new Chart`/`Chart.getChart` 호출에서 스크립트 전체가 멈춰 이후 기능이 초기화되지 않는다. 오프라인·차단 환경에서 화면을 검증할 때는 `window.Chart`를 스텁으로 넣고(`Chart.getChart`, `Chart.register` 포함) 렌더 함수(`renderHoldings([...])` 등)에 샘플 데이터를 직접 넣어 확인한다
+- **Chart.js 의존**: CDN 로드가 실패하면 첫 `new Chart`/`Chart.getChart` 호출에서 스크립트 전체가 멈춰 이후 기능이 초기화되지 않는다. 오프라인·차단 환경에서 화면을 검증할 때는 `window.Chart`를 스텁으로 넣고(`Chart.getChart`, `Chart.register` 포함) 렌더 함수(`renderHoldings([...])` 등)에 샘플 데이터를 직접 넣어 확인한다. 실제 그래프 모양까지 보려면 `npm pack chart.js@4.4.1`로 받은 `dist/chart.umd.js`를 Playwright `page.route('**/chart.umd.min.js', …)`로 대신 응답한다
 - **프록시까지 로컬 테스트**하려면 `npx vercel dev` + 환경변수 필요. 그 외에는 배포본에서 확인하는 것이 정상 워크플로우
 - **운영 주소**: Vercel 배포본만 완전 동작. GitHub Pages는 프록시가 없어 사용하지 않음
 
@@ -71,7 +71,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `curDept` | 선택한 부서 탭 |
 | `dashToken`, `finnhubKey` | 프록시 접근 토큰, Finnhub API 키 |
 
-월 지출은 없는 달을 열면 직전 달에서 카드·정기지출을 자동 이월하되 청구액은 0으로 초기화한다(`loadMonth`).
+월 지출은 없는 달을 열면 직전 달에서 카드·정기지출을 자동 이월하되 청구액은 0으로 초기화한다(`loadMonth`). 보유금액(`cash`)은 이월하지 않는다. 총지출 합계 아래 보유금액 입력(`setExpCash`/`renderExpCash`)은 총지출 대비 여유·부족을 보여준다. 월별 지출 추이(`renderExpChart`)는 정기·기타 누적 막대이고, 막대 꼭대기가 곧 총지출이라 선 없이 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다.
 
 날짜가 바뀌는 것은 `/* ===== 날짜 바뀜 감지 ===== */`의 `applyNewDay()`가 1분 간격 + 탭 복귀 시 처리한다. 날짜에 따라 달라지는 화면을 추가하면 여기서도 다시 그려야 한다.
 
@@ -82,6 +82,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ch는 칸 자신의 글꼴로 재므로 `.pricecell`은 보통 굵기로 두고 통합 행·머리글·합계의 금액만 굵게 한다
 - 같은 종목을 2개 이상 계좌에 보유하면 통합 행(`mergeHoldings`)을 붙인다. 합계에서는 통합 행을 제외한다
 - 합계 줄의 가격 칸 값은 목표가 × 수량 합계("목표 평가")이고, 전체 수익률은 "합계" 글자 옆에 표시한다
+- 1분 자동 갱신: "자동 갱신(1분)"(`trAuto`)이 켜져 있고 장중(KST 평일 09:00~15:30)일 때 `refreshToday()`가 잔고·오늘 체결·실현손익을 다시 받아 `showHoldings()`로 표 전체를 다시 그린다. 불러오기(`loadTrades`) 후 장중이면 자동으로 켜진다
 - 수수료율은 계좌명으로 정한다(`acctFee`: "우대" 0.0016%, 그 외 0.015%). 목표수익률은 입력칸 `hTarget`
 - 추가 매수 칸: 현재가로 n주를 더 살 때의 새 매입가·본전가·필요 금액(`addBuyHtml`). 가정용이라 저장하지 않고 메모리 `addBuyQty`(키 `htKey`)에만 두어 자동 갱신 재렌더에도 유지된다. 입력칸 옆 "≈현재가 n주"(`addBuyNeed`)는 새 매입가가 현재가와 1천원(`ADD_BUY_GAP`) 미만이 되는 최소 수량이다. 현재가로 사면 매입가는 현재가에 수렴할 뿐 같아지지 않으므로 이 기준을 쓴다. 필요 금액이 그 계좌 예수금(`acctCash`: `lastBal.summary`의 `cashD2||cash`)보다 많으면 적색, 잔고를 아직 못 받았으면 색을 바꾸지 않는다
 
@@ -114,6 +115,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 같은 개념이 여러 곳에 다른 방식으로 구현되어 있으므로 한쪽만 고치지 말 것:
 
 - **본전가·목표가 공식** — `avg*(1+fee)/(1-fee-tax)` 형태가 `calcSwitch()`(손절 후 재매수), `renderHoldings()`(보유종목), `htTargetPrice()`·`holdGainHtml()`(목표 입력·예상이익), `addBuyHtml()`(추가 매수)에 각각 있다
+- **월 총지출 공식** — 카드 청구액(체크분) + 카드 외 정기지출. `renderExpAll()`(화면 합계)과 `monthTotals()`(추이 그래프)에 따로 있다
 - **ETF 판별** — 프록시는 `per===0 && pbr===0`으로(`getFull`), 프론트는 종목명 키워드 배열 `ETF_KW`로(`isEtfName`) 판정한다
 
 ## 관련 문서
