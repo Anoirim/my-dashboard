@@ -1239,14 +1239,26 @@ function renderExpChart(){
   const t=months.map(monthTotals);
   if(expChart)expChart.destroy();
   if(!months.length){$("expChartNote").textContent="기록된 달이 없습니다.";return;}
+  // 정기+기타를 쌓은 막대 꼭대기가 곧 총지출이라 총지출 선은 두지 않고, 막대 위에 합계 숫자를 쓴다
+  const totalLabels={id:"expTotals",afterDatasetsDraw(ch){
+    // 범례로 한쪽을 숨기면 보이는 막대들의 합만 쓴다(숨긴 값까지 더하면 막대 높이와 숫자가 어긋난다)
+    const c=ch.ctx, vis=ch.data.datasets.map((d,i)=>({d,m:ch.getDatasetMeta(i)})).filter(x=>!x.m.hidden);
+    c.save(); c.fillStyle="#e6ebf5"; c.font="600 11px sans-serif"; c.textAlign="center"; c.textBaseline="bottom";
+    t.forEach((_,i)=>{
+      const bars=vis.map(x=>x.m.data[i]).filter(Boolean);
+      const sum=vis.reduce((s,x)=>s+(x.d.data[i]||0),0);
+      if(!bars.length||!sum)return;
+      const top=Math.min(...bars.map(b=>b.y));
+      c.fillText(Math.round(sum/10000).toLocaleString("ko-KR")+"만",bars[0].x,top-4);
+    });
+    c.restore();
+  }};
   expChart=new Chart($("expChart").getContext("2d"),{
-    // order가 작은 데이터셋이 위에 그려진다. 선이 막대에 가리지 않도록 line을 0으로 둔다.
+    type:"bar",
+    plugins:[totalLabels],
     data:{labels:months,datasets:[
-      {type:"line",label:"총지출",data:t.map(x=>x.total),borderColor:"#33d69f",backgroundColor:"transparent",
-        borderWidth:3,pointRadius:4,pointHoverRadius:6,pointBackgroundColor:"#33d69f",
-        pointBorderColor:"#0f1420",pointBorderWidth:2,tension:.15,order:0},
-      {type:"bar",label:"정기지출",data:t.map(x=>x.fixed),backgroundColor:"#4f8cff",stack:"s",borderRadius:4,order:1},
-      {type:"bar",label:"기타(카드 비정기)",data:t.map(x=>x.etc),backgroundColor:"#ff8fab",stack:"s",borderRadius:4,order:1}
+      {label:"정기지출",data:t.map(x=>x.fixed),backgroundColor:"#4f8cff",stack:"s",borderRadius:4},
+      {label:"기타(카드 비정기)",data:t.map(x=>x.etc),backgroundColor:"#ff8fab",stack:"s",borderRadius:4}
     ]},
     options:{
       interaction:{mode:"index",intersect:false},
@@ -1257,10 +1269,11 @@ function renderExpChart(){
           callbacks:{
             label:c=>" "+c.dataset.label+" "+wonKR(c.parsed.y),
             footer:it=>{const x=t[it[0].dataIndex];
-              return "카드값 "+wonKR(x.card)+" (정기 "+wonKR(x.cardFixed)+")\n카드외 정기 "+wonKR(x.nonCardFixed);}
+              return "총지출 "+wonKR(x.total)+"\n카드값 "+wonKR(x.card)+" (정기 "+wonKR(x.cardFixed)+")\n카드외 정기 "+wonKR(x.nonCardFixed);}
           }}
       },
-      scales:{y:{stacked:true,ticks:{color:"#8b97ad",callback:v=>Math.round(v/10000).toLocaleString("ko-KR")+"만"},grid:{color:"#2a3346"}},
+      // grace: 가장 높은 막대 위에도 합계 숫자가 들어갈 여유(범례와 겹치지 않게)
+      scales:{y:{stacked:true,grace:"12%",ticks:{color:"#8b97ad",callback:v=>Math.round(v/10000).toLocaleString("ko-KR")+"만"},grid:{color:"#2a3346"}},
         x:{stacked:true,ticks:{color:"#8b97ad"},grid:{display:false}}}}
   });
   const tot=t.map(x=>x.total), avg=tot.reduce((s,v)=>s+v,0)/tot.length;
