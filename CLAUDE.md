@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 개인용 웹 대시보드. 빌드 시스템·패키지 매니저·테스트 프레임워크가 **없다**. `package.json`, `vercel.json` 모두 없으며 Vercel의 zero-config가 `api/` 디렉터리를 서버리스 함수로 자동 인식한다.
 
-- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,200줄). Chart.js만 CDN(cdnjs) 로드
+- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,300줄). Chart.js만 CDN(cdnjs) 로드
 - `api/kis.js` — KIS(한국투자증권) OpenAPI 프록시 + 한국은행 ECOS·Google 뉴스 RSS 중계. CommonJS 핸들러 1개 (약 600줄)
 
 줄 수가 계속 늘고 있으므로 위치는 줄 번호가 아니라 **함수명·블록 주석으로 찾을 것**.
@@ -60,7 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `scheds` | 스케줄러 `[{date, time, text, done}]`. `date`(YYYY-MM-DD)가 있으면 안약 달력에도 병기. 날짜 기능 이전 항목은 `date` 없음 |
 | `eye_YYYY-MM-DD` | 날짜별 안약 복용 `[bool×4]` (오전 코솝·알파간, 오후 코솝·알파간) |
-| `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?, cashHand?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=그달 통장 잔액, `cashHand`=그달 현금, 모두 이월 안 함. 예전 단일 보유금액은 `cash`라 통장으로 읽힌다), 보던 달. `saveExpData`는 `cash`가 지워지지 않게 기존 월 객체에 합친다 |
+| `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?, cashHand?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=통장, `cashHand`=현금), 보던 달. 규칙은 `### 월 지출 관리` 절 |
 | `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
 | `workOverrides` | 근무 일정 날짜별 예외 |
 | `pickupTime`, `pickupSkips`, `pickupAlarm` | 하원 시각, 하원 없는 날, 알림 on/off |
@@ -71,9 +71,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `curDept` | 선택한 부서 탭 |
 | `dashToken`, `finnhubKey` | 프록시 접근 토큰, Finnhub API 키 |
 
-월 지출은 없는 달을 열면 직전 달에서 카드·정기지출을 자동 이월하되 청구액은 0으로 초기화한다(`loadMonth`). 카드외 비정기(`oneoff`)와 보유금액(`cash`·`cashHand`)은 이월하지 않는다. 하단 요약은 [정기지출(카드정기 + 카드외 정기)] [기타(비정기) = 카드 비정기 + 카드외 비정기] [총지출] 3박스이며 정기 + 비정기 = 총지출이다. 정기 박스와 정기지출 목록 위 합계(`fixedTotalTop`)는 같은 기준(체크된 카드의 카드정기 + 카드외 정기)이다. 계산에서 뺀 카드로 결제하는 정기지출과 청구액에 없는 카드정기(`cut`)는 합계에 넣지 않고 세부 줄(`fixedBreakdown`)에 따로 알린다. 카드별 분해(`cardSplit`)는 실제 청구액을 정기지출(예상)보다 우선한다: 청구액을 넣었으면 반영액 = 청구액이고 카드정기는 청구액을 넘지 않게 자르며(넘는 몫 `cut`은 합계 미포함으로 알림), 청구액이 0원(미입력)일 때만 그 카드 정기지출로 추정한다(`est`). 어느 경우에도 기타가 음수가 되지 않고 정기 + 비정기 = 총지출이 유지된다. 상단 카드 총액은 입력한 청구액 그대로 보여준다. 총지출 합계 아래 보유금액 입력(통장 `expCash` + 현금 `expCashHand`, `setExpCash(key,v)`/`renderExpCash`)은 두 값의 합을 총지출과 비교해 여유·부족을 보여주고, 둘 다 입력했으면 통장만으로 비교한 결과도 함께 보여준다(여유면 "통장만 n원 여유", 부족이면 "n원 통장 채우기 필요"). 입력칸은 자릿수 쉼표를 보여주려고 `type="text"`이며 `fmtExpCash`가 입력 중 쉼표·커서를 맞추고 `cashNum`으로 숫자만 읽는다. 월별 지출 추이(`renderExpChart`)는 정기·기타 누적 막대이고, 막대 꼭대기가 곧 총지출이라 선 없이 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다.
-
 날짜가 바뀌는 것은 `/* ===== 날짜 바뀜 감지 ===== */`의 `applyNewDay()`가 1분 간격 + 탭 복귀 시 처리한다. 날짜에 따라 달라지는 화면을 추가하면 여기서도 다시 그려야 한다.
+
+### 월 지출 관리 (`renderExpAll`)
+
+화면 순서는 카드값 → 정기지출 → 카드외 비정기 → 하단 요약 3박스 → 보유금액 → 월별 지출 추이다.
+
+- **이월** — 없는 달을 열면 직전 달에서 카드·정기지출을 이월하고 청구액은 0으로 둔다(`loadMonth`). 카드외 비정기(`oneoff`)와 보유금액(`cash`·`cashHand`)은 이월하지 않는다
+- **카드별 분해(`cardSplit`)** — 실제 청구액을 정기지출(예상)보다 우선한다
+  - 청구액 입력: 반영액 = 청구액. 카드정기는 청구액을 넘지 않게 자르고(`fx`), 넘는 몫(`cut`)은 합계에 넣지 않는다
+  - 청구액 0원(미입력): 그 카드 정기지출로 추정한다(`est`)
+  - 어느 경우에도 카드 비정기(반영액 − 카드정기)는 음수가 되지 않는다. 체크된 카드 합은 `cardSums()`
+- **하단 요약 3박스** — [정기지출 = 카드정기 + 카드외 정기] [기타(비정기) = 카드 비정기 + 카드외 비정기] [총지출]. 정기 + 비정기 = 총지출
+  - 정기지출 목록 위 합계(`fixedTotalTop`)도 정기 박스와 같은 기준
+  - 계산 제외 카드로 결제하는 정기지출과 청구액에 없는 카드정기(`cut`)는 합계에서 빼고 세부 줄(`fixedBreakdown`)에 따로 알린다
+  - 상단 카드 총액(`cardTotalTop`)만은 입력한 청구액 그대로 보여준다
+- **보유금액** — 통장(`expCash`→`cash`) + 현금(`expCashHand`→`cashHand`)의 합을 총지출과 비교해 여유·부족을 보여준다(`setExpCash(key,v)`/`renderExpCash`). 둘 다 입력하면 통장만 비교도 보여준다(여유: "통장만 n원 여유", 부족: "n원 통장 채우기 필요")
+  - 입력칸은 쉼표 표시를 위해 `type="text"`. `fmtExpCash`가 입력 중 쉼표·커서를 맞추고 `cashNum`으로 숫자만 읽는다
+  - 예전 단일 보유금액은 `cash` 키라 그대로 통장 값으로 읽힌다
+- **저장** — `saveExpData`는 월 객체를 덮어쓰지 않고 기존 값에 합친다. 그래서 `cards`·`fixed`·`oneoff` 외의 `cash`·`cashHand`가 지워지지 않는다
+- **월별 지출 추이(`renderExpChart`)** — 정기·기타 누적 막대. 막대 꼭대기가 곧 총지출이라 선을 두지 않고 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다. 계산은 `monthTotals()`
 
 ### 보유종목 표 (`renderHoldings`)
 
