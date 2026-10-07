@@ -1293,11 +1293,14 @@ function renderExpAll(){
   const cardEtc=cs.etc;
   // 카드외 정기지출
   const nonCardFixed=fixed.filter(f=>fxInc(f)&&f.method==="계좌/현금").reduce((s,f)=>s+f.amt,0);
-  // 정기지출 합계 = 체크된 정기지출만
-  const fixedTotal=fixed.filter(fxInc).reduce((s,f)=>s+f.amt,0);
+  // 정기지출 합계 = 총지출에 실제로 들어가는 정기분(체크된 카드의 카드정기 + 카드외 정기). 하단 정기지출 박스와 같은 값
+  const fixedTotal=cardFixed+nonCardFixed;
+  // 체크는 돼 있지만 결제 카드를 계산에서 뺐거나 카드 목록에 없어 합계에 안 들어가는 정기지출
+  const fixedOut=fixed.filter(fxInc).reduce((s,f)=>s+f.amt,0)-fixedTotal;
   // 정기지출 섹션 상단: 합계 + 카드정기/카드외정기 세부
   $("fixedTotalTop").textContent=wonKR(fixedTotal);
-  $("fixedBreakdown").textContent=`카드정기 ${wonKR(cardFixed)} · 카드외 정기 ${wonKR(nonCardFixed)}`;
+  $("fixedBreakdown").textContent=`카드정기 ${wonKR(cardFixed)} · 카드외 정기 ${wonKR(nonCardFixed)}`
+    +(fixedOut>0?` · 계산 제외 카드 결제분 ${wonKR(fixedOut)}(합계 미포함)`:"");
   // 하단 요약: 기타(카드 비정기) + 총지출 합계
   // 총지출 = 카드 청구액(체크분) + 카드외 정기지출 (카드정기는 카드값에 이미 포함 → 중복 방지)
   // 카드외 비정기 목록 (날짜 순)
