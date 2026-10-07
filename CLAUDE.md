@@ -60,7 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `scheds` | 스케줄러 `[{date, time, text, done}]`. `date`(YYYY-MM-DD)가 있으면 안약 달력에도 병기. 날짜 기능 이전 항목은 `date` 없음 |
 | `eye_YYYY-MM-DD` | 날짜별 안약 복용 `[bool×4]` (오전 코솝·알파간, 오후 코솝·알파간) |
-| `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed} }`, 보던 달 |
+| `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, cash?} }`(`cash`=그달 보유금액, 이월 안 함), 보던 달. `saveExpData`는 `cash`가 지워지지 않게 기존 월 객체에 합친다 |
 | `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
 | `workOverrides` | 근무 일정 날짜별 예외 |
 | `pickupTime`, `pickupSkips`, `pickupAlarm` | 하원 시각, 하원 없는 날, 알림 on/off |
