@@ -1172,6 +1172,18 @@ function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value
 function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
 // 체크를 끄면 그 달 합계·카드 정기분에서 빠진다. 값이 없는 기존 데이터는 포함으로 본다.
 const fxInc=f=>f.inc!==false;
+// 카드별 청구액 분해. 청구액이 그 카드로 내는 정기지출보다 작으면(대개 아직 청구액을 안 넣은 새 달)
+// 정기지출만큼은 나갈 돈으로 보고 그 금액을 쓴다. 그래야 기타가 음수로 나오지 않고 총지출에서 정기지출이 빠지지 않는다.
+function cardSplit(c,fixed){
+  const fx=fixed.filter(f=>fxInc(f)&&f.method===c.name).reduce((s,f)=>s+(f.amt||0),0);
+  const bill=c.bill||0, eff=Math.max(bill,fx);
+  return {fx,bill,eff,etc:eff-fx,est:bill<fx};
+}
+// 체크된 카드 합계: 청구액(입력값)·반영액(eff)·카드정기·카드 비정기
+function cardSums(cards,fixed){
+  return cards.filter(c=>c.inc!==false).map(c=>cardSplit(c,fixed))
+    .reduce((t,x)=>({bill:t.bill+x.bill,eff:t.eff+x.eff,fx:t.fx+x.fx,etc:t.etc+x.etc}),{bill:0,eff:0,fx:0,etc:0});
+}
 function toggleFixed(i){fixed[i].inc=!fxInc(fixed[i]);saveExpData();renderExpAll();}
 // 카드외 비정기 (계좌·현금 일회성)
 function addOneoff(){
@@ -1228,14 +1240,13 @@ function renderExpAll(){
   // 카드 리스트 (왼쪽 체크박스로 계산 포함/제외, 정기 포함분·기타분 표시)
   $("cardList").innerHTML=cards.map((c,i)=>{
     const on=c.inc!==false;
-    const inc=fixed.filter(f=>fxInc(f)&&f.method===c.name).reduce((s,f)=>s+f.amt,0);
-    const etc=c.bill-inc;
+    const {fx:inc,etc,est}=cardSplit(c,fixed);
     return `<li class="sched-item" draggable="true" style="${on?'':'opacity:.5'}"
       ondragstart="dndStart('card',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('card',${i},this)" ondragend="dndEnd()">
       <span class="drag" title="드래그로 순서 변경">⠿</span>
       <input type="checkbox" ${on?'checked':''} onchange="toggleCard(${i})" title="월 총지출 계산 포함">
       <span class="time">${c.day?c.day+"일":"-"}</span>
-      <span class="txt">${esc(c.name)} <span style="color:var(--muted);font-size:12px">· 정기 ${wonKR(inc)} + 기타 ${wonKR(etc)}</span></span>
+      <span class="txt">${esc(c.name)} <span style="color:var(--muted);font-size:12px">· 정기 ${wonKR(inc)} + 기타 ${wonKR(etc)}${est?` <span style="color:#f5a623" title="청구액이 이 카드 정기지출보다 적어 정기지출 금액으로 계산합니다">(청구액 미입력 · 정기 기준)</span>`:""}</span></span>
       <span class="exp-amt">${wonKR(c.bill)}</span>
       <button class="exp-edit" onclick="editCard(${i})">수정</button>
       <button class="del" onclick="delCard(${i})">✕</button>
@@ -1258,13 +1269,14 @@ function renderExpAll(){
   }).join("")||'<div class="hint">등록된 정기지출이 없습니다.</div>';
 
   // 요약 (체크된 카드만 합산, 중복 방지)
-  const cardTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>s+c.bill,0);
-  $("cardTotalTop").textContent=wonKR(cardTotal);
-  const checkedNames=new Set(cards.filter(c=>c.inc!==false).map(c=>c.name));
+  // 카드값: 상단 총액은 입력한 청구액 그대로, 계산에는 카드별 반영액(청구액과 카드정기 중 큰 값)을 쓴다
+  const cs=cardSums(cards,fixed);
+  $("cardTotalTop").textContent=wonKR(cs.bill);
+  const cardTotal=cs.eff;
   // 카드정기지출: 체크된 카드로 결제되는 정기지출
-  const cardFixed=fixed.filter(f=>fxInc(f)&&checkedNames.has(f.method)).reduce((s,f)=>s+f.amt,0);
-  // 기타(카드 비정기): 체크된 카드 청구액 - 카드정기지출
-  const cardEtc=cardTotal-cardFixed;
+  const cardFixed=cs.fx;
+  // 기타(카드 비정기): 카드별 (반영액 - 카드정기) 합. 음수가 되지 않는다
+  const cardEtc=cs.etc;
   // 카드외 정기지출
   const nonCardFixed=fixed.filter(f=>fxInc(f)&&f.method==="계좌/현금").reduce((s,f)=>s+f.amt,0);
   // 정기지출 합계 = 체크된 정기지출만
@@ -1306,13 +1318,11 @@ let expChart=null;
 // renderExpAll과 같은 기준. 카드로 내는 정기지출은 카드값에 포함돼 총지출에서 중복 계산하지 않는다.
 function monthTotals(m){
   const d=expData[m]||{}, cards=d.cards||[], fixed=d.fixed||[], oneoff=d.oneoff||[];
-  const cardTotal=cards.filter(c=>c.inc!==false).reduce((s,c)=>s+(c.bill||0),0);
-  const names=new Set(cards.filter(c=>c.inc!==false).map(c=>c.name));
-  const cardFixed=fixed.filter(f=>fxInc(f)&&names.has(f.method)).reduce((s,f)=>s+(f.amt||0),0);
+  const cs=cardSums(cards,fixed), cardTotal=cs.eff, cardFixed=cs.fx;
   const nonCardFixed=fixed.filter(f=>fxInc(f)&&f.method==="계좌/현금").reduce((s,f)=>s+(f.amt||0),0);
   const nonCardEtc=oneoff.filter(o=>o.inc!==false).reduce((s,o)=>s+(o.amt||0),0);
-  return {card:cardTotal,fixed:cardFixed+nonCardFixed,etc:cardTotal-cardFixed+nonCardEtc,
-    cardFixed,nonCardFixed,cardEtc:cardTotal-cardFixed,nonCardEtc,total:cardTotal+nonCardFixed+nonCardEtc};
+  return {card:cardTotal,fixed:cardFixed+nonCardFixed,etc:cs.etc+nonCardEtc,
+    cardFixed,nonCardFixed,cardEtc:cs.etc,nonCardEtc,total:cardTotal+nonCardFixed+nonCardEtc};
 }
 function renderExpChart(){
   if(!$("expChart"))return;
