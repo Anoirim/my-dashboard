@@ -46,7 +46,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 영속화: localStorage 단일 소스 + 파일 미러
 
-모든 데이터는 localStorage에 있고, 백업/복원과 자동기록은 **localStorage 전체를 덤프/복원**한다(`collectAll()`, `backupData()`). 따라서 새 상태를 저장할 때 localStorage를 쓰기만 하면 백업 대상에 자동 포함된다.
+모든 데이터는 localStorage에 있고, 백업/복원과 자동기록은 **localStorage 전체를 덤프/복원**한다(`collectAll()`, `backupData()`). 따라서 새 상태를 저장할 때 localStorage를 쓰기만 하면 백업 대상에 자동 포함된다. 예외: 구글 캘린더 연결 중의 날짜 있는 일정은 구글에만 있어 백업에 들어가지 않는다.
 
 **중요 1**: 상태를 변경하는 모든 저장 함수는 마지막에 `autoSaveFile()`을 호출해야 File System Access 파일 미러가 동기화된다(`saveScheds`, `saveEye`, `saveExpData` 참고). 새 저장 경로를 추가하면서 이 호출을 빠뜨리면 자동기록만 조용히 어긋난다.
 
@@ -58,7 +58,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 키 | 내용 |
 |---|---|
-| `scheds` | 스케줄러 `[{date, time, text, done}]`. `date`(YYYY-MM-DD)가 있으면 안약 달력에도 병기. 날짜 기능 이전 항목은 `date` 없음 |
+| `scheds` | 스케줄러 로컬 일정 `[{date, time, text, done}]`. 날짜 없는 일정과 구글 연결 전 날짜 일정. 구글 연결 중의 날짜 일정은 여기 없고 구글 캘린더가 원본 |
+| `gcalClientId` | 구글 OAuth 클라이언트 ID(공개 값). 토큰은 localStorage가 아니라 sessionStorage `gcalTok`에만 둔다(백업 덤프에 들어가지 않게) |
 | `eye_YYYY-MM-DD` | 날짜별 안약 복용 `[bool×4]` (오전 코솝·알파간, 오후 코솝·알파간) |
 | `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?, cashHand?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=통장, `cashHand`=현금), 보던 달. 규칙은 `### 월 지출 관리` 절 |
 | `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
@@ -72,6 +73,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `dashToken`, `finnhubKey` | 프록시 접근 토큰, Finnhub API 키 |
 
 날짜가 바뀌는 것은 `/* ===== 날짜 바뀜 감지 ===== */`의 `applyNewDay()`가 1분 간격 + 탭 복귀 시 처리한다. 날짜에 따라 달라지는 화면을 추가하면 여기서도 다시 그려야 한다.
+
+### 스케줄러 + 구글 캘린더 (`/* ===== 스케줄러 ===== */`)
+
+- 구글 캘린더를 연결하면 **날짜 있는 일정은 구글 캘린더(primary)가 원본**이고 대시보드에 복사하지 않는다. 메모리 `gcalEvents`에만 들고 5분마다·탭 복귀·달 이동(받아 둔 구간 밖) 시 `gcalRefresh()`로 다시 받는다
+- 브라우저에서 Google Identity Services 토큰 클라이언트(`gcalConnect`, scope `calendar.events`)로 토큰을 받아 Calendar API를 직접 부른다(`gcalFetch`). 서버(`api/kis.js`)를 거치지 않는다. 401이면 토큰을 버리고 "다시 연결"을 띄운다
+- 화면 항목은 로컬·구글을 `{src:"l"|"g", key, date, time, text, done}`로 통일해 `dayItems(ymd)`(그날)·`renderScheds()`(목록: 로컬 전부 + 구글은 오늘 이후)·`schedItemHtml()`로 그린다. 동작은 `itemToggle/itemEdit/itemDel(src,key)`, 수정은 스케줄러 입력칸을 "저장" 모드(`schedEdit`)로 바꿔 `addSched()`가 PATCH한다
+- 완료 체크는 구글 일정에 항목이 없어 `extendedProperties.private.dashDone`("1"/"0")에 적는다. 기존 private 값은 `gcalPriv()`로 합쳐 보낸다
+- 시각은 브라우저 시간대와 무관하게 `Asia/Seoul`로 읽고 보낸다(`gcalYmd`/`gcalHm`/`gcalWhen`). 시간 없는 일정은 종일 일정, 시간 있는 새 일정은 1시간, 수정 시 기존 길이 유지. 여러 날 종일 일정은 날마다 한 줄로 펼친다(`gcalExpand`)
+- 연결 전 날짜 일정은 "기존 날짜 일정 N개 구글로 옮기기"(`gcalMigrate`)로 옮기고, 성공한 것만 로컬에서 지운다
+- 상태 변수(`gcalEvents` 등)는 스케줄러 블록 위쪽에 선언해야 한다. 안약 달력 초기 렌더가 `dayItems()`를 부르므로 뒤에 두면 TDZ로 멈춘다
 
 ### 월 지출 관리 (`renderExpAll`)
 
