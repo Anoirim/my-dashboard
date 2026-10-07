@@ -71,7 +71,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `curDept` | 선택한 부서 탭 |
 | `dashToken`, `finnhubKey` | 프록시 접근 토큰, Finnhub API 키 |
 
-월 지출은 없는 달을 열면 직전 달에서 카드·정기지출을 자동 이월하되 청구액은 0으로 초기화한다(`loadMonth`). 카드외 비정기(`oneoff`)와 보유금액(`cash`)은 이월하지 않는다. 하단 "기타(비정기)" = 카드 비정기(카드 청구액 − 카드정기) + 카드외 비정기. 총지출 합계 아래 보유금액 입력(`setExpCash`/`renderExpCash`)은 총지출 대비 여유·부족을 보여준다. 입력칸은 자릿수 쉼표를 보여주려고 `type="text"`이며 `fmtExpCash`가 입력 중 쉼표·커서를 맞추고 `cashNum`으로 숫자만 읽는다. 월별 지출 추이(`renderExpChart`)는 정기·기타 누적 막대이고, 막대 꼭대기가 곧 총지출이라 선 없이 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다.
+월 지출은 없는 달을 열면 직전 달에서 카드·정기지출을 자동 이월하되 청구액은 0으로 초기화한다(`loadMonth`). 카드외 비정기(`oneoff`)와 보유금액(`cash`)은 이월하지 않는다. 하단 "기타(비정기)" = 카드 비정기 + 카드외 비정기. 카드 비정기는 카드별로 `cardSplit`이 (반영액 − 그 카드 정기지출)을 구하며, 반영액 = max(청구액, 그 카드 정기지출)이라 청구액을 아직 안 넣은 새 달에도 음수가 되지 않고 정기지출이 총지출에서 빠지지 않는다. 상단 카드 총액은 입력한 청구액 그대로 보여준다. 총지출 합계 아래 보유금액 입력(`setExpCash`/`renderExpCash`)은 총지출 대비 여유·부족을 보여준다. 입력칸은 자릿수 쉼표를 보여주려고 `type="text"`이며 `fmtExpCash`가 입력 중 쉼표·커서를 맞추고 `cashNum`으로 숫자만 읽는다. 월별 지출 추이(`renderExpChart`)는 정기·기타 누적 막대이고, 막대 꼭대기가 곧 총지출이라 선 없이 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다.
 
 날짜가 바뀌는 것은 `/* ===== 날짜 바뀜 감지 ===== */`의 `applyNewDay()`가 1분 간격 + 탭 복귀 시 처리한다. 날짜에 따라 달라지는 화면을 추가하면 여기서도 다시 그려야 한다.
 
@@ -115,7 +115,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 같은 개념이 여러 곳에 다른 방식으로 구현되어 있으므로 한쪽만 고치지 말 것:
 
 - **본전가·목표가 공식** — `avg*(1+fee)/(1-fee-tax)` 형태가 `calcSwitch()`(손절 후 재매수), `renderHoldings()`(보유종목), `htTargetPrice()`·`holdGainHtml()`(목표 입력·예상이익), `addBuyHtml()`(추가 매수)에 각각 있다
-- **월 총지출 공식** — 카드 청구액(체크분) + 카드 외 정기지출 + 카드외 비정기. `renderExpAll()`(화면 합계)과 `monthTotals()`(추이 그래프)에 따로 있다
+- **월 총지출 공식** — 카드 반영액(체크분, `cardSums`) + 카드 외 정기지출 + 카드외 비정기. `renderExpAll()`(화면 합계)과 `monthTotals()`(추이 그래프)에 따로 있다. 카드 부분은 둘 다 `cardSums()`를 공유한다
 - **ETF 판별** — 프록시는 `per===0 && pbr===0`으로(`getFull`), 프론트는 종목명 키워드 배열 `ETF_KW`로(`isEtfName`) 판정한다
 
 ## 관련 문서
