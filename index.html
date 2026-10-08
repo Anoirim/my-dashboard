@@ -52,6 +52,8 @@
   .wk-cell .ev.done{text-decoration:line-through;color:var(--muted)}
   .wk-cell .ev.more{color:var(--muted)}
   .wk-cell .ev.g{color:#c77dff} /* 구글 캘린더 일정 */
+  .sched-group{font-size:12px;font-weight:700;color:var(--muted);margin:6px 2px 0}
+  .sched-group.today{color:var(--accent)} .sched-group.late{color:var(--danger)}
   .gtag{font-size:10px;font-weight:700;color:#c77dff;border:1px solid #c77dff;border-radius:4px;padding:0 3px;margin-left:4px}
   .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
   /* 근무 일정 달력 */
@@ -1018,15 +1020,16 @@ function dayItems(ymd){
   const g=gcalEvents.filter(e=>e.date===ymd).map(gcalItem);
   return l.concat(g).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
 }
-// full=스케줄러 목록(날짜·수정·삭제 버튼), 아니면 안약 달력의 좁은 패널(이름을 누르면 스케줄러에서 수정)
-function schedItemHtml(it,full){
+// full=스케줄러 목록(수정·삭제 버튼), 아니면 안약 달력의 좁은 패널(이름을 누르면 스케줄러에서 수정)
+// showDate=항목에 날짜를 붙일지(날짜별로 묶은 목록에서는 머리글에 있으므로 뺀다), past=오늘 이미 지난 시각이라 흐리게
+function schedItemHtml(it,full,showDate=full,past=false){
   const k=it.src==="l"?it.key:`'${it.key}'`;
   // 구글 일정은 캘린더 색으로 G 표시, 수정 권한이 없는 캘린더는 체크·수정·삭제를 막는다
   const tag=it.src==="g"?`<span class="gtag" style="color:${it.color};border-color:${it.color}" title="구글 캘린더 일정${it.ro?" (보기만)":""}">${it.ro?"G 보기":"G"}</span>`:'';
   const name=`${it.text.replace(/</g,'&lt;')}${tag}`;
-  return `<li class="sched-item ${it.done?'done':''}">
+  return `<li class="sched-item ${it.done?'done':''}"${past?' style="opacity:.55"':''}>
       <input type="checkbox" ${it.done?'checked':''} ${it.ro?'disabled':''} onchange="itemToggle('${it.src}',${k})">
-      ${full?`<span class="sdate">${schedDateLabel(it.date)}</span>`:""}
+      ${showDate?`<span class="sdate">${schedDateLabel(it.date)}</span>`:""}
       <span class="time">${it.time||''}</span>
       ${full?`<span class="txt">${name}</span>
       ${it.ro?"":`<button class="exp-edit" onclick="itemEdit('${it.src}',${k})">수정</button>
@@ -1034,15 +1037,36 @@ function schedItemHtml(it,full){
       :`<span class="txt" ${it.ro?"":`style="cursor:pointer" title="누르면 스케줄러 입력칸에서 고칠 수 있습니다" onclick="itemEdit('${it.src}',${k})"`}>${name}</span>`}
     </li>`;
 }
+// 스케줄러 목록은 가까운 일만: 오늘 + 앞으로 7일(날짜별 묶음), 날짜 없는 할 일, 끝나지 않은 지난 로컬 일정.
+// 그보다 먼 일정은 개수만 알리고 안약 달력에서 본다. 보기 전용 캘린더(공휴일 등)는 목록에서 빼고 달력에만 둔다.
+const SCHED_DAYS=7;
 function renderScheds(){
   sortScheds();
-  const today=new Date().toLocaleDateString("sv-SE");
-  // 구글 일정은 오늘 이후만 목록에 둔다(지난 일정은 달력에서 본다). 같은 일정의 여러 날 줄은 첫 줄만
-  const seen=new Set();
-  const g=gcalEvents.filter(e=>e.date>=today&&!seen.has(e.uid)&&seen.add(e.uid)).map(gcalItem);
+  const now=new Date(), today=now.toLocaleDateString("sv-SE");
+  const end=new Date(now); end.setDate(end.getDate()+SCHED_DAYS); const endYmd=end.toLocaleDateString("sv-SE");
+  const nowHm=String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0");
   const l=scheds.map((x,i)=>({src:"l",key:i,date:x.date,time:x.time,text:x.text,done:x.done}));
-  const all=l.concat(g).sort((a,b)=>((a.date||"")+(a.time||"")).localeCompare((b.date||"")+(b.time||"")));
-  $("schedList").innerHTML=all.map(it=>schedItemHtml(it,true)).join("")||'<div class="hint">등록된 일정이 없습니다.</div>';
+  const g=gcalEvents.filter(e=>e.write).map(gcalItem);
+  const dated=l.filter(x=>x.date).concat(g), byTime=(a,b)=>(a.time||"").localeCompare(b.time||"");
+  const head=(t,cls)=>`<li class="sched-group ${cls||""}">${t}</li>`;
+  let html="";
+  // 끝나지 않은 지난 로컬 일정(구글 연결 전 것). 구글 일정의 지난 날은 달력에서 본다
+  const overdue=l.filter(x=>x.date&&x.date<today&&!x.done);
+  if(overdue.length)html+=head("지난 일정(미완료)","late")+overdue.map(it=>schedItemHtml(it,true,true)).join("");
+  let any=false;
+  for(let i=0;i<=SCHED_DAYS;i++){
+    const d=new Date(now); d.setDate(d.getDate()+i); const ymd=d.toLocaleDateString("sv-SE");
+    const items=dated.filter(x=>x.date===ymd).sort(byTime); if(!items.length)continue;
+    any=true;
+    html+=head((i===0?"오늘 ":i===1?"내일 ":"")+schedDateLabel(ymd),i===0?"today":"")
+      +items.map(it=>schedItemHtml(it,true,false,i===0&&!!it.time&&it.time<nowHm&&!it.done)).join("");
+  }
+  if(!any)html+=`<li class="hint" style="margin:4px 0">앞으로 ${SCHED_DAYS}일 일정이 없습니다.</li>`;
+  const later=new Set(dated.filter(x=>x.date>endYmd).map(x=>x.src+x.key)).size;
+  if(later)html+=`<li class="hint" style="margin:4px 0">이후 일정 ${later}개는 안약 달력에서 볼 수 있습니다.</li>`;
+  const memo=l.filter(x=>!x.date);
+  if(memo.length)html+=head("할 일 (날짜 없음)")+memo.map(it=>schedItemHtml(it,true,false)).join("");
+  $("schedList").innerHTML=html;
   if(typeof gcalStatus==="function"&&$("gcalState"))gcalStatus($("gcalState").textContent);
 }
 // 스케줄이 바뀌면 안약 달력의 병기도 함께 다시 그린다
@@ -1104,6 +1128,7 @@ $("gcalClientId").value=localStorage.getItem("gcalClientId")||"";
 renderScheds();
 // 연결돼 있으면 5분마다, 그리고 탭으로 돌아올 때 다시 읽는다(구글에서 고친 내용 반영)
 setInterval(()=>{if(gcalOn()&&!document.hidden)gcalRefresh();},5*60*1000);
+setInterval(()=>{if(!document.hidden)renderScheds();},60*1000); // 오늘 지난 시각 일정을 흐리게 바꾼다
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&gcalOn())gcalRefresh();});
 
 /* ===== 식품 재고 (폐기 감소 목적: 위험한 것부터 보여준다) ===== */
