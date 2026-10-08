@@ -60,6 +60,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `scheds` | 스케줄러 로컬 일정 `[{date, time, text, done}]`. 날짜 없는 일정과 구글 연결 전 날짜 일정. 구글 연결 중의 날짜 일정은 여기 없고 구글 캘린더가 원본 |
 | `gcalClientId` | 구글 OAuth 클라이언트 ID(공개 값). 토큰은 localStorage가 아니라 sessionStorage `gcalTok`에만 둔다(백업 덤프에 들어가지 않게) |
+| `gcalCalSel`, `gcalTarget` | 보여줄 구글 캘린더 id 배열(없으면 구글 화면에서 켜 둔 캘린더), 새 일정을 만들 캘린더 id(없으면 기본 캘린더) |
 | `eye_YYYY-MM-DD` | 날짜별 안약 복용 `[bool×4]` (오전 코솝·알파간, 오후 코솝·알파간) |
 | `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?, cashHand?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=통장, `cashHand`=현금), 보던 달. 규칙은 `### 월 지출 관리` 절 |
 | `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
@@ -76,8 +77,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 스케줄러 + 구글 캘린더 (`/* ===== 스케줄러 ===== */`)
 
-- 구글 캘린더를 연결하면 **날짜 있는 일정은 구글 캘린더(primary)가 원본**이고 대시보드에 복사하지 않는다. 메모리 `gcalEvents`에만 들고 5분마다·탭 복귀·달 이동(받아 둔 구간 밖) 시 `gcalRefresh()`로 다시 받는다
-- 브라우저에서 Google Identity Services 토큰 클라이언트(`gcalConnect`, scope `calendar.events`)로 토큰을 받아 Calendar API를 직접 부른다(`gcalFetch`). 서버(`api/kis.js`)를 거치지 않는다. 401이면 토큰을 버리고 "다시 연결"을 띄운다
+- 구글 캘린더를 연결하면 **날짜 있는 일정은 구글 캘린더가 원본**이고 대시보드에 복사하지 않는다. 캘린더 목록(`gcalLoadCals`, calendarList)에서 고른 캘린더들을 함께 읽고, 새 일정은 저장 캘린더(`gcalTargetId`)에 만든다. 일정 항목은 `uid`("캘린더 순번~이벤트 id")로 구분하고 API는 그 일정의 `cal`로 부른다. 초대받은 일정이 두 캘린더에 함께 보이면 `iCalUID`+날짜+시각이 같은 것은 수정 가능한 쪽 하나만 남긴다. 수정 권한(owner/writer)이 없는 캘린더 일정은 체크·수정·삭제를 막는다(`ro`). 메모리 `gcalEvents`에만 들고 5분마다·탭 복귀·달 이동(받아 둔 구간 밖) 시 `gcalRefresh()`로 다시 받는다
+- 브라우저에서 Google Identity Services 토큰 클라이언트(`gcalConnect`, scope `calendar.events` + `calendar.calendarlist.readonly`)로 토큰을 받아 Calendar API를 직접 부른다(`gcalFetch`). 서버(`api/kis.js`)를 거치지 않는다. 401이면 토큰을 버리고 "다시 연결"을 띄운다. 저장된 토큰은 scope가 바뀌면 버려 다시 동의를 받는다. 캘린더 목록 권한을 못 받으면(`gcalListDenied`) 기본 캘린더만 쓴다
 - 화면 항목은 로컬·구글을 `{src:"l"|"g", key, date, time, text, done}`로 통일해 `dayItems(ymd)`(그날)·`renderScheds()`(목록: 로컬 전부 + 구글은 오늘 이후)·`schedItemHtml()`로 그린다. 동작은 `itemToggle/itemEdit/itemDel(src,key)`, 수정은 스케줄러 입력칸을 "저장" 모드(`schedEdit`)로 바꿔 `addSched()`가 PATCH한다
 - 완료 체크는 구글 일정에 항목이 없어 `extendedProperties.private.dashDone`("1"/"0")에 적는다. 기존 private 값은 `gcalPriv()`로 합쳐 보낸다
 - 시각은 브라우저 시간대와 무관하게 `Asia/Seoul`로 읽고 보낸다(`gcalYmd`/`gcalHm`/`gcalWhen`). 시간 없는 일정은 종일 일정, 시간 있는 새 일정은 1시간, 수정 시 기존 길이 유지. 여러 날 종일 일정은 날마다 한 줄로 펼친다(`gcalExpand`)
