@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 개인용 웹 대시보드. 빌드 시스템·패키지 매니저·테스트 프레임워크가 **없다**. `package.json`, `vercel.json` 모두 없으며 Vercel의 zero-config가 `api/` 디렉터리를 서버리스 함수로 자동 인식한다.
 
-- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,300줄). Chart.js만 CDN(cdnjs) 로드
+- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,600줄). Chart.js만 CDN(cdnjs) 로드
 - `api/kis.js` — KIS(한국투자증권) OpenAPI 프록시 + 한국은행 ECOS·Google 뉴스 RSS 중계. CommonJS 핸들러 1개 (약 600줄)
 
 줄 수가 계속 늘고 있으므로 위치는 줄 번호가 아니라 **함수명·블록 주석으로 찾을 것**.
@@ -77,7 +77,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 스케줄러 + 구글 캘린더 (`/* ===== 스케줄러 ===== */`)
 
-- 구글 캘린더를 연결하면 **날짜 있는 일정은 구글 캘린더가 원본**이고 대시보드에 복사하지 않는다. 캘린더 목록(`gcalLoadCals`, calendarList)에서 고른 캘린더들을 함께 읽고, 새 일정은 저장 캘린더(`gcalTargetId`)에 만든다. 일정 항목은 `uid`("캘린더 순번~이벤트 id")로 구분하고 API는 그 일정의 `cal`로 부른다. 초대받은 일정이 두 캘린더에 함께 보이면 `iCalUID`+날짜+시각이 같은 것은 수정 가능한 쪽 하나만 남긴다. 수정 권한(owner/writer)이 없는 캘린더 일정은 체크·수정·삭제를 막는다(`ro`). 메모리 `gcalEvents`에만 들고 5분마다·탭 복귀·달 이동(받아 둔 구간 밖) 시 `gcalRefresh()`로 다시 받는다
+- 구글 캘린더를 연결하면 **날짜 있는 일정은 구글 캘린더가 원본**이고 대시보드에 복사하지 않는다. 메모리 `gcalEvents`에만 들고 5분마다·탭 복귀·달 이동(받아 둔 구간 밖) 시 `gcalRefresh()`로 다시 받는다
+- **여러 캘린더** — 캘린더 목록(`gcalLoadCals`, calendarList → `gcalCals`)에서 고른 캘린더(`gcalCalSel`)를 함께 읽고, 새 일정은 저장 캘린더(`gcalTargetId`)에 만든다. 설정 칸은 `renderGcalCals()`
+  - 일정 항목은 `uid`("캘린더 순번~이벤트 id")로 구분하고, API는 그 일정의 `cal`로 부른다(`gcalFetch(method,path,body,cal)`)
+  - 초대받은 일정이 두 캘린더에 함께 보이면 `iCalUID`+날짜+시각이 같은 것은 수정 가능한 쪽 하나만 남긴다
+  - 수정 권한(owner/writer)이 없는 캘린더(구독·공휴일 등) 일정은 체크·수정·삭제를 막는다(`ro`, "G 보기")
 - 브라우저에서 Google Identity Services 토큰 클라이언트(`gcalConnect`, scope `calendar.events` + `calendar.calendarlist.readonly`)로 토큰을 받아 Calendar API를 직접 부른다(`gcalFetch`). 서버(`api/kis.js`)를 거치지 않는다. 401이면 토큰을 버리고 "다시 연결"을 띄운다. 저장된 토큰은 scope가 바뀌면 버려 다시 동의를 받는다. 캘린더 목록 권한을 못 받으면(`gcalListDenied`) 기본 캘린더만 쓴다
 - 화면 항목은 로컬·구글을 `{src:"l"|"g", key, date, time, text, done}`로 통일해 `dayItems(ymd)`(그날)·`renderScheds()`(목록: 로컬 전부 + 구글은 오늘 이후)·`schedItemHtml()`로 그린다. 동작은 `itemToggle/itemEdit/itemDel(src,key)`, 수정은 스케줄러 입력칸을 "저장" 모드(`schedEdit`)로 바꿔 `addSched()`가 PATCH한다
 - 완료 체크는 구글 일정에 항목이 없어 `extendedProperties.private.dashDone`("1"/"0")에 적는다. 기존 private 값은 `gcalPriv()`로 합쳐 보낸다
@@ -149,4 +153,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 관련 문서
 
-`대시보드-프로젝트-정리.md`에 기능 목록, Vercel 환경변수 전체, 미구현 아이디어가 정리되어 있다. 기능 변경 시 이 문서도 함께 갱신할지 확인할 것.
+`대시보드-프로젝트-정리.md`에 기능 목록, Vercel 환경변수 전체, 구글 캘린더 연동 설정 방법(5-1), 미구현 아이디어가 정리되어 있다. 기능 변경 시 이 문서도 함께 갱신할지 확인할 것.
