@@ -557,8 +557,8 @@
         <input type="number" id="cardBill" placeholder="청구액(원)·선택" style="width:140px">
         <button onclick="addCard()">추가</button>
       </div>
-      <!-- 항목 49px + gap 8px 기준 6개 노출 (49*6+8*5=334) -->
-      <ul class="sched-list" id="cardList" style="margin-top:0;max-height:334px"></ul>
+      <!-- 월 지출 목록(카드·정기·카드외 비정기)은 개수가 늘어도 스크롤 없이 전부 펼쳐 보인다 -->
+      <ul class="sched-list" id="cardList" style="margin-top:0;max-height:none;overflow:visible"></ul>
 
       <div class="exp-divider"></div>
 
@@ -580,7 +580,6 @@
         <select id="fxMethod" style="width:130px"></select>
         <button onclick="addFixed()">추가</button>
       </div>
-      <!-- 정기지출은 개수가 늘어도 스크롤 없이 전부 펼쳐 보인다 -->
       <ul class="sched-list" id="fxList" style="margin-top:0;max-height:none;overflow:visible"></ul>
 
       <div class="exp-divider"></div>
@@ -596,7 +595,7 @@
         <input type="number" id="ooAmt" placeholder="금액(원)" style="width:120px">
         <button onclick="addOneoff()">추가</button>
       </div>
-      <ul class="sched-list" id="ooList" style="margin-top:0;max-height:334px"></ul>
+      <ul class="sched-list" id="ooList" style="margin-top:0;max-height:none;overflow:visible"></ul>
 
       <div class="exp-sum" id="expSum" style="margin-top:16px"></div>
       <!-- 보유금액으로 그달 총지출을 감당할 수 있는지 -->
