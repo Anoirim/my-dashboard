@@ -1,4 +1,4 @@
-task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림 (2026-10-12, PR #1~#26 main 머지 완료)
+task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림·월 지출 목록 표시 (2026-10-12, PR #1~#27 main 머지 완료)
 files:
   - index.html: 완료
     - 하원 일정·스케줄러 시간 입력칸 120→150px (#pkTime, #schedTime)
@@ -26,9 +26,10 @@ files:
       안약 블록이 먼저 실행되므로 localStorage expData를 직접 읽음(TDZ). renderExpAll 끝에서 renderEye 호출
     - 카드·정기지출·카드외 비정기 목록(cardList·fxList·ooList) 높이 제한 해제 → 스크롤 없이 전부 표시
     - 월 지출 목록 날짜 표시 (PR #26): 이번 달일 때 오늘 줄 강조(exp-today), 지난 날 줄 흐리게(exp-past), expDayCls. applyNewDay에서 renderExpAll
-  - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준 (줄 번호 대신 함수명·블록 주석)
+  - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준 (줄 번호 대신 함수명·블록 주석, index.html 약 3,700줄, PR #27)
 progress: 완료 (모두 main 반영·Vercel 배포)
 next_step: 실제 구글 계정으로 캘린더 연동 확인(클라이언트 ID 발급 후), 실제 계좌·지출 데이터로 배포본 확인
+  (월 지출 목록 오늘 강조·지난 날 흐리게가 배포본에서 보기 좋은지)
   (결제일 알림: 사용자 정기지출 9일 마리아 수녀회 2,000 / 14일 프리드 30,000 / 25일 캔디코드 787,947 이 달력에 맞게 뜨는지)
   (검증은 샘플 데이터 + Chart 스텁/npm Chart.js 4.4.1 + Playwright로 모의한 GIS·Calendar API로만 했음)
 note:
