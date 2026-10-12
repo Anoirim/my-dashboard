@@ -107,6 +107,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 예전 단일 보유금액은 `cash` 키라 그대로 통장 값으로 읽힌다
 - **저장** — `saveExpData`는 월 객체를 덮어쓰지 않고 기존 값에 합친다. 그래서 `cards`·`fixed`·`oneoff` 외의 `cash`·`cashHand`가 지워지지 않는다
 - **월별 지출 추이(`renderExpChart`)** — 정기·기타 누적 막대. 막대 꼭대기가 곧 총지출이라 선을 두지 않고 인라인 플러그인으로 막대 위에 합계(보이는 데이터셋 합)를 쓴다. 계산은 `monthTotals()`
+- **결제일 알림(안약 달력)** — `eyePays(y,m)`가 그 달의 계좌/현금 정기지출(결제일 `day`)과 체크된 카드의 결제일(청구액, 0원이면 그 카드 정기지출 합으로 "약 n원", 둘 다 없으면 "청구액 미입력")을 날짜별로 모아 달력 칸에 주황 `₩이름`(`.ev.pay`, 일정과 합쳐 2개+N)으로, 날짜 패널에 "결제" 목록(여러 건이면 합계)으로 보여준다. 카드로 내는 정기지출은 카드 결제일에 포함되므로 따로 띄우지 않는다
+  - 안약 블록이 월 지출 블록보다 앞이라 `expData`·`fxInc`를 쓰지 않고 localStorage `expData`를 직접 읽는다(TDZ). 달별 결과는 `eyePayCache`에 두고 `renderEye()`마다 비운다
+  - 없는 달(미래 달 등)은 `loadMonth`처럼 직전 달 기준(체크는 다시 포함, 청구액 0)으로 본다. 결제일이 그 달 말일보다 크면 말일로 당긴다
+  - 지출이 바뀌면 `renderExpAll()` 끝에서 `renderEye()`를 불러 달력에 반영한다
 
 ### 보유종목 표 (`renderHoldings`)
 
