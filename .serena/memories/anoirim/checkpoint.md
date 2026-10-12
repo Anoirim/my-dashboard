@@ -25,7 +25,7 @@ files:
     - 결제일 알림 (PR #24): 안약 달력에 계좌/현금 정기지출 결제일 + 카드 결제일을 주황 ₩로 표시(eyePays, 패널에 금액·합계).
       안약 블록이 먼저 실행되므로 localStorage expData를 직접 읽음(TDZ). renderExpAll 끝에서 renderEye 호출
     - 카드·정기지출·카드외 비정기 목록(cardList·fxList·ooList) 높이 제한 해제 → 스크롤 없이 전부 표시
-    - 안약 달력에 근무 일정 통합 (PR #30 예정): 칸에 근무처 칩(workChip)·공휴일, 패널에서 근무처 변경(workOptions → applyWorkEdit),
+    - 안약 달력에 근무 일정 통합 (PR #29 예정): 칸에 근무처 칩(workChip)·공휴일, 패널에서 근무처 변경(workOptions → applyWorkEdit),
       달 요약 workSummary(eyeWork). 근무 데이터는 안약 블록 앞 '근무 일정 — 데이터' 블록으로 이동(TDZ). 근무 일정 카드는 사용자 확인 후 제거 예정
     - 월 지출 목록 날짜 표시 (PR #26): 이번 달일 때 오늘 줄 강조(exp-today), 지난 날 줄 흐리게(exp-past), expDayCls. applyNewDay에서 renderExpAll
   - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준 (줄 번호 대신 함수명·블록 주석, index.html 약 3,700줄, PR #27)
