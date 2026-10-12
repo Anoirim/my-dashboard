@@ -102,6 +102,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 정기지출 목록 위 합계(`fixedTotalTop`)도 정기 박스와 같은 기준
   - 계산 제외 카드로 결제하는 정기지출과 청구액에 없는 카드정기(`cut`)는 합계에서 빼고 세부 줄(`fixedBreakdown`)에 따로 알린다
   - 상단 카드 총액(`cardTotalTop`)만은 입력한 청구액 그대로 보여준다
+  - 정기지출 목록(`fxList`)은 높이 제한 없이 전부 펼친다(카드·카드외 비정기 목록은 6개 높이 후 스크롤)
 - **보유금액** — 통장(`expCash`→`cash`) + 현금(`expCashHand`→`cashHand`)의 합을 총지출과 비교해 여유·부족을 보여준다(`setExpCash(key,v)`/`renderExpCash`). 둘 다 입력하면 통장만 비교도 보여준다(여유: "통장만 n원 여유", 부족: "n원 통장 채우기 필요")
   - 입력칸은 쉼표 표시를 위해 `type="text"`. `fmtExpCash`가 입력 중 쉼표·커서를 맞추고 `cashNum`으로 숫자만 읽는다
   - 예전 단일 보유금액은 `cash` 키라 그대로 통장 값으로 읽힌다
