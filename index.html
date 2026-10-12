@@ -580,7 +580,8 @@
         <select id="fxMethod" style="width:130px"></select>
         <button onclick="addFixed()">추가</button>
       </div>
-      <ul class="sched-list" id="fxList" style="margin-top:0;max-height:480px"></ul>
+      <!-- 정기지출은 개수가 늘어도 스크롤 없이 전부 펼쳐 보인다 -->
+      <ul class="sched-list" id="fxList" style="margin-top:0;max-height:none;overflow:visible"></ul>
 
       <div class="exp-divider"></div>
 
