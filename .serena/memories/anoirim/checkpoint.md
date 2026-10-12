@@ -1,4 +1,4 @@
-task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림 (2026-10-12, PR #1~#24 main 머지 완료)
+task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림 (2026-10-12, PR #1~#25 main 머지 완료)
 files:
   - index.html: 완료
     - 하원 일정·스케줄러 시간 입력칸 120→150px (#pkTime, #schedTime)
@@ -25,6 +25,7 @@ files:
     - 결제일 알림 (PR #24): 안약 달력에 계좌/현금 정기지출 결제일 + 카드 결제일을 주황 ₩로 표시(eyePays, 패널에 금액·합계).
       안약 블록이 먼저 실행되므로 localStorage expData를 직접 읽음(TDZ). renderExpAll 끝에서 renderEye 호출
     - 카드·정기지출·카드외 비정기 목록(cardList·fxList·ooList) 높이 제한 해제 → 스크롤 없이 전부 표시
+    - 월 지출 목록 날짜 표시 (PR #26 예정): 이번 달일 때 오늘 줄 강조(exp-today), 지난 날 줄 흐리게(exp-past), expDayCls. applyNewDay에서 renderExpAll
   - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준 (줄 번호 대신 함수명·블록 주석)
 progress: 완료 (모두 main 반영·Vercel 배포)
 next_step: 실제 구글 계정으로 캘린더 연동 확인(클라이언트 ID 발급 후), 실제 계좌·지출 데이터로 배포본 확인

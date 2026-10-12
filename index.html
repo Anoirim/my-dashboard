@@ -181,6 +181,12 @@
   .news-meta{color:var(--muted);font-size:12px}
   .exp-label{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:600}
   .exp-divider{height:1px;background:var(--border);margin:18px 0}
+  /* 월 지출 목록: 보고 있는 달이 이번 달일 때 오늘 날짜 줄은 강조, 지난 날짜 줄은 색조를 낮춘다 */
+  .sched-item.exp-today{border-color:var(--accent);background:rgba(79,140,255,.14);box-shadow:0 0 0 2px rgba(79,140,255,.25)}
+  .sched-item.exp-today .time{font-weight:800}
+  .sched-item.exp-today .time::after{content:"오늘";margin-left:4px;font-size:10px;font-weight:800;
+    background:var(--accent);color:#fff;border-radius:4px;padding:1px 4px;vertical-align:1px}
+  .sched-item.exp-past{filter:saturate(.35) brightness(.75)}
   .exp-edit{color:var(--accent)!important;border:none;background:transparent;cursor:pointer;padding:4px 6px;font-size:13px}
   .cat-tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(79,140,255,.15);color:var(--accent)}
   .drag{cursor:grab;color:var(--muted);user-select:none;font-size:14px;padding-right:2px}
@@ -1584,6 +1590,14 @@ function carryFixedFromPrev(){
   alert(prev+" 기준 정기지출 "+added+"건을 불러왔어요.");
 }
 
+// 이번 달을 볼 때만 날짜 줄에 오늘(exp-today)·지난 날(exp-past)을 붙인다. 지난 달·다음 달은 그대로 둔다.
+// 그 달 말일보다 큰 날짜(31일 등)는 말일로 보고 비교한다
+function expDayCls(day){
+  const t=new Date(), ym=t.toLocaleDateString("sv-SE").slice(0,7);
+  if(!(day>0)||curMonth!==ym)return "";
+  const d=Math.min(day,new Date(t.getFullYear(),t.getMonth()+1,0).getDate());
+  return d===t.getDate()?"exp-today":d<t.getDate()?"exp-past":"";
+}
 function renderExpAll(){
   const keepSel=$("fxMethod").value;
   buildMethodOptions(keepSel);
@@ -1592,7 +1606,7 @@ function renderExpAll(){
   $("cardList").innerHTML=cards.map((c,i)=>{
     const on=c.inc!==false;
     const {fx:inc,fxAll,bill,etc,est,cut}=cardSplit(c,fixed);
-    return `<li class="sched-item" draggable="true" style="${on?'':'opacity:.5'}"
+    return `<li class="sched-item ${expDayCls(c.day)}" draggable="true" style="${on?'':'opacity:.5'}"
       ondragstart="dndStart('card',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('card',${i},this)" ondragend="dndEnd()">
       <span class="drag" title="드래그로 순서 변경">⠿</span>
       <input type="checkbox" ${on?'checked':''} onchange="toggleCard(${i})" title="월 총지출 계산 포함">
@@ -1607,7 +1621,7 @@ function renderExpAll(){
   // 정기지출 리스트 (결제일 순 정렬)
   const order=[...fixed.keys()].sort((a,b)=>((fixed[a].day||99)-(fixed[b].day||99)));
   $("fxList").innerHTML=order.map(i=>{const f=fixed[i];const isCard=f.method!=="계좌/현금";const on=fxInc(f);
-    return `<li class="sched-item" style="${on?'':'opacity:.5'}">
+    return `<li class="sched-item ${expDayCls(f.day)}" style="${on?'':'opacity:.5'}">
       <input type="checkbox" ${on?'checked':''} onchange="toggleFixed(${i})" title="이 달 계산에 포함">
       <span class="time">${f.day?f.day+"일":"-"}</span>
       <span class="cat-tag">${esc(f.cat||"기타")}</span>
@@ -1645,7 +1659,7 @@ function renderExpAll(){
   // 카드외 비정기 목록 (날짜 순)
   const ooOrder=[...oneoff.keys()].sort((a,b)=>((oneoff[a].day||99)-(oneoff[b].day||99)));
   $("ooList").innerHTML=ooOrder.map(i=>{const o=oneoff[i];const on=o.inc!==false;
-    return `<li class="sched-item" style="${on?'':'opacity:.5'}">
+    return `<li class="sched-item ${expDayCls(o.day)}" style="${on?'':'opacity:.5'}">
       <input type="checkbox" ${on?'checked':''} onchange="toggleOneoff(${i})" title="이 달 계산에 포함">
       <span class="time">${o.day?o.day+"일":"-"}</span>
       <span class="txt">${esc(o.name)}</span>
@@ -3603,6 +3617,7 @@ function applyNewDay(prev){
   if(mkYmd(wkCur).slice(0,7)===prev.slice(0,7))wkCur=firstOfThisMonth();
 
   renderEye();renderWork();renderFoods();renderMarketCal();renderPickup();
+  renderExpAll(); // 월 지출 목록의 오늘·지난 날짜 표시(expDayCls)
   renderScheds(); // 구글 일정 목록은 '오늘 이후'만 보여주므로 날이 바뀌면 다시 그린다
   if(gcalOn())gcalRefresh();
 }
