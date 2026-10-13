@@ -1,4 +1,4 @@
-task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림·월 지출 목록 표시 (2026-10-12, PR #1~#29 main 머지 완료)
+task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림·월 지출 목록 표시 + 근무 일정 통합 (2026-10-13, PR #1~#30 main 머지 완료, #31 대기)
 files:
   - index.html: 완료
     - 하원 일정·스케줄러 시간 입력칸 120→150px (#pkTime, #schedTime)
@@ -26,7 +26,9 @@ files:
       안약 블록이 먼저 실행되므로 localStorage expData를 직접 읽음(TDZ). renderExpAll 끝에서 renderEye 호출
     - 카드·정기지출·카드외 비정기 목록(cardList·fxList·ooList) 높이 제한 해제 → 스크롤 없이 전부 표시
     - 안약 달력에 근무 일정 통합 (PR #29): 칸에 근무처 칩(workChip)·공휴일, 패널에서 근무처 변경(workOptions → applyWorkEdit),
-      달 요약 workSummary(eyeWork). 근무 데이터는 안약 블록 앞 '근무 일정 — 데이터' 블록으로 이동(TDZ). 근무 일정 카드는 사용자 확인 후 제거 예정
+      달 요약 workSummary(eyeWork). 근무 데이터는 안약 블록 앞 '근무 일정 — 데이터' 블록으로 이동(TDZ). 
+    - 근무 일정 카드 제거 (PR #31 예정): renderWork·wkCur·wkMove 등 화면 블록 삭제, applyWorkEdit는 데이터 블록으로(renderEye만).
+      범례·오늘 근무는 workLegendHtml → eyeWorkLegend
     - 월 지출 목록 날짜 표시 (PR #26): 이번 달일 때 오늘 줄 강조(exp-today), 지난 날 줄 흐리게(exp-past), expDayCls. applyNewDay에서 renderExpAll
   - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준 (줄 번호 대신 함수명·블록 주석, index.html 약 3,700줄, PR #27)
 progress: 완료 (모두 main 반영·Vercel 배포)
