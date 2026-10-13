@@ -64,7 +64,7 @@
   .sched-group.today{color:var(--accent)} .sched-group.late{color:var(--danger)}
   .gtag{font-size:10px;font-weight:700;color:#c77dff;border:1px solid #c77dff;border-radius:4px;padding:0 3px;margin-left:4px}
   .sched-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent2)}
-  /* 근무 일정 달력 */
+  /* 달력 공통(.wk-*): 안약 달력이 쓴다(근무 일정 카드는 안약 달력에 통합돼 없어짐) */
   .wk-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
   .wk-head{text-align:center;font-size:12px;font-weight:700;color:var(--muted);padding:6px 0}
   .wk-head.sun{color:var(--danger)} .wk-head.sat{color:var(--accent)}
@@ -86,11 +86,6 @@
   .wk-cell.empty{cursor:default}
   .wk-cell.hol{background:rgba(255,92,114,.07)}
   .wk-hol{font-size:10px;color:var(--danger);font-weight:700;line-height:1.3;word-break:keep-all}
-  /* 요일 규칙에서 벗어나게 직접 지정한 날 표시 */
-  .wk-fix{color:var(--accent);font-style:normal;margin-left:3px;font-size:13px}
-  .wk-cell.editing{border-color:var(--accent);z-index:2}
-  .wk-sel{width:100%;padding:2px 4px;font-size:11px;border-radius:5px;
-    background:var(--card);border:1px solid var(--accent);color:var(--text)}
   /* 안약 달력: 근무 캘린더(.wk-*)를 재사용하고 링과 선택 패널만 따로 둔다 */
   .eye-ring{width:26px;height:26px;border-radius:50%;margin:2px auto 0;
     display:grid;place-items:center;font-size:10px;font-weight:800;color:var(--muted)}
@@ -342,7 +337,8 @@
             <button class="ghost" onclick="eyeMove(0)">이번 달</button>
           </div>
           <div class="wk-grid" id="eyeGrid"></div>
-          <div class="hint" id="eyeWork" style="margin-top:8px"></div>
+          <div class="wk-legend" id="eyeWorkLegend" style="margin:10px 0 4px"></div>
+          <div class="hint" id="eyeWork" style="margin:0"></div>
         </div>
       </div>
       <div class="hint" id="eyeNote" style="margin-top:10px"></div>
@@ -368,21 +364,6 @@
         <summary id="fdStockSum">비축 (실온)</summary>
         <div id="fdStockList"></div>
       </details>
-    </div>
-
-    <!-- 근무 일정 -->
-    <div class="card full" data-dept="general">
-      <h2><span class="dot" style="background:#c77dff"></span>근무 일정
-        <span id="wkToday" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
-      <div class="row" style="margin-bottom:10px">
-        <button class="ghost" onclick="wkMove(-1)">◀ 이전</button>
-        <b id="wkTitle" style="min-width:110px;text-align:center"></b>
-        <button class="ghost" onclick="wkMove(1)">다음 ▶</button>
-        <button class="ghost" onclick="wkMove(0)">이번 달</button>
-      </div>
-      <div class="wk-legend" id="wkLegend"></div>
-      <div class="wk-grid" id="wkGrid"></div>
-      <div class="hint" id="wkSummary" style="margin-top:10px"></div>
     </div>
 
     <!-- 시장 일정 -->
@@ -670,7 +651,7 @@ function reloadAll(){
   pickupSkips=JSON.parse(localStorage.getItem("pickupSkips")||"[]");
   pickupAlarm=localStorage.getItem("pickupAlarm")!=="off";
   renderScheds();renderEye();renderCashFlows();loadMonth(curMonth);
-  renderFoods();renderWork();renderPickup();
+  renderFoods();renderPickup();
   // 보유종목은 잔고를 다시 받아야 하므로, 이미 받아둔 값이 있을 때만 다시 그린다
   if(typeof lastHoldings!=="undefined"&&lastHoldings.length)showHoldings(lastHoldings);
 }
@@ -1283,7 +1264,7 @@ renderFoods();
 
 /* ===== 근무 일정 — 데이터 (요일 고정 근무표) =====
    안약 달력이 근무를 함께 보여주므로 안약 블록보다 앞에 둔다(뒤에 두면 초기 렌더에서 TDZ).
-   요일만 정해져 있어 날짜 계산으로 한 달치를 그대로 만든다. 저장할 상태가 없다.
+   요일 규칙으로 한 달치를 계산하고, 규칙에서 벗어난 날만 workOverrides에 저장한다. 공휴일(HOLIDAYS)은 하원 일정도 쓴다.
    근무처가 바뀌면 WORK_SHIFTS의 요일 배열만 고치면 된다. */
 const WORK_SHIFTS=[
   {name:"하이웨이마트 오목천점", short:"하이웨이", days:[1,4,5], color:"#33d69f"}, // 월·목·금
@@ -1356,7 +1337,7 @@ function workChip(ymd,dow,base=`<span class="wk-off">휴무</span>`){
   const k=restKind(ymd,dow); if(k==="base")return base;
   const v=REST_KINDS[k]; return chip(v.label,v.bg,v.color);
 }
-// 그 달 근무 요약(근무 일정 카드·안약 달력 공용)
+// 그 달 근무 요약(안약 달력 아래 eyeWork)
 function workSummary(y,m){
   const count={}, rest={}, last=new Date(y,m+1,0).getDate();
   for(let d=1;d<=last;d++){
@@ -1374,6 +1355,22 @@ function workSummary(y,m){
     .concat(rest.leave?[`연차 ${rest.leave}일`]:[]).join(" · ");
   return `${m+1}월 근무 ${workDays}일 (${parts.join(" · ")}) · ${restTxt}`
     +(holCnt?` · 공휴일 ${holCnt}일`:"")+(fixCnt?` · 직접 지정 ${fixCnt}일`:"");
+}
+// 안약 달력 패널의 근무 선택칸. 값 ""은 요일 기본값으로 되돌리기(지정 삭제)
+function applyWorkEdit(ymd,val){
+  if(val==="")delete workOverrides[ymd];
+  else workOverrides[ymd]=val;
+  saveWorkOverrides();renderEye();
+}
+// 범례(근무처 전체 이름·요일)와 오늘 근무. 안약 달력 아래에 붙인다
+function workLegendHtml(){
+  const wk=["일","월","화","수","목","금","토"], now=new Date(), today=now.toLocaleDateString("sv-SE");
+  const ts=shiftOn(today,now.getDay()), tk=ts?null:restKind(today,now.getDay());
+  const todayTxt="오늘 "+(ts?ts.name:(tk==="base"?"휴무":REST_KINDS[tk].label))+(HOLIDAYS[today]?` · ${HOLIDAYS[today]}`:"");
+  return `<b style="font-size:12px">${todayTxt}</b>`+WORK_SHIFTS.map(s=>
+    `<span class="chip" style="background:${tint(s.color,.18)};color:${s.color}">${s.short}</span>`
+    +`<span style="color:var(--muted)">${s.name} · ${s.days.map(d=>wk[d]).join("·")}</span>`).join("")
+    +`<span class="wk-off">그 외 휴무</span>`;
 }
 // 근무처 선택칸의 option들. 값 ""은 요일 기본값으로 되돌리기
 function workOptions(ymd,dow){
@@ -1500,6 +1497,7 @@ function renderEye(){
     </div>`;
   }
   $("eyeGrid").innerHTML=html;
+  $("eyeWorkLegend").innerHTML=workLegendHtml();
   $("eyeWork").textContent=workSummary(y,m);
 
   // 아직 오지 않은 날은 분모에서 뺀다. 이번 달은 그래서 "오늘까지"로 적어야 오해가 없다
@@ -3408,68 +3406,6 @@ function drawEquity(labels,assets,investLine,fullDates,rateLine,idx,kq,fx,jpy){
   });
 }
 
-/* ===== 근무 일정 (요일 고정 근무표) — 화면 =====
-   근무표·공휴일·변경 기록(데이터)은 안약 달력도 쓰므로 안약 블록 앞 '근무 일정 — 데이터'에 있다(TDZ). */
-// 날짜를 누르면 그 칸에 드롭다운을 띄운다. 열려 있는 날짜(없으면 null)
-let wkEditing=null;
-function openWorkEdit(ymd,ev){
-  if(ev)ev.stopPropagation();
-  wkEditing=(wkEditing===ymd)?null:ymd;
-  renderWork();
-}
-function applyWorkEdit(ymd,val){
-  if(val==="")delete workOverrides[ymd]; // 요일 기본값으로 되돌리기
-  else workOverrides[ymd]=val;
-  wkEditing=null;
-  saveWorkOverrides();renderWork();renderEye(); // 안약 달력의 근무 표시도 함께
-}
-// 바깥을 클릭하면 닫는다
-document.addEventListener("click",()=>{if(wkEditing!==null){wkEditing=null;renderWork();}});
-let wkCur=new Date(); wkCur.setDate(1); // 보고 있는 달의 1일
-function wkMove(n){
-  if(n===0){wkCur=new Date();wkCur.setDate(1);}
-  else wkCur.setMonth(wkCur.getMonth()+n);
-  renderWork();
-}
-function renderWork(){
-  const y=wkCur.getFullYear(), m=wkCur.getMonth();
-  const today=new Date().toLocaleDateString("sv-SE");
-  const first=new Date(y,m,1), last=new Date(y,m+1,0);
-  const wk=["일","월","화","수","목","금","토"];
-  $("wkTitle").textContent=`${y}년 ${m+1}월`;
-
-  $("wkLegend").innerHTML=WORK_SHIFTS.map(s=>
-    `<span class="chip" style="background:${tint(s.color,.18)};color:${s.color}">${s.short}</span>`
-    +`<span style="color:var(--muted)">${s.name} · ${s.days.map(d=>wk[d]).join("·")}</span>`
-  ).join("")+`<span class="wk-off">그 외 휴무</span>`;
-
-  let html=wk.map((w,i)=>`<div class="wk-head ${i===0?'sun':i===6?'sat':''}">${w}</div>`).join("");
-  for(let i=0;i<first.getDay();i++)html+=`<div class="wk-cell empty"></div>`; // 1일 앞 빈칸
-  for(let d=1;d<=last.getDate();d++){
-    const dt=new Date(y,m,d), dow=dt.getDay(), ymd=dt.toLocaleDateString("sv-SE");
-    const hol=HOLIDAYS[ymd], fixed=workOverrides[ymd]!==undefined;
-    const red=dow===0||hol; // 일요일과 공휴일은 날짜를 붉게
-    const editing=wkEditing===ymd;
-    const sel=`<select class="wk-sel" onclick="event.stopPropagation()"
-        onchange="applyWorkEdit('${ymd}',this.value)">${workOptions(ymd,dow)}</select>`;
-    html+=`<div class="wk-cell ${ymd===today?'today':''} ${red?'sun':''} ${hol?'hol':''} ${editing?'editing':''}"
-      onclick="openWorkEdit('${ymd}',event)" title="누르면 근무처를 고를 수 있습니다">
-      <span class="d">${d}${fixed?'<i class="wk-fix" title="직접 지정한 날">•</i>':''}</span>
-      ${hol?`<span class="wk-hol">${hol}</span>`:''}
-      ${editing?sel:workChip(ymd,dow)}
-    </div>`;
-  }
-  $("wkGrid").innerHTML=html;
-
-  $("wkSummary").textContent=workSummary(y,m)+" · 날짜를 누르면 근무처를 고를 수 있습니다";
-
-  const now=new Date(), ts=shiftOn(today,now.getDay());
-  const tk=ts?null:restKind(today,now.getDay());
-  $("wkToday").textContent="오늘 "+(ts?ts.name:(tk==="base"?"휴무":REST_KINDS[tk].label))
-    +(HOLIDAYS[today]?` · ${HOLIDAYS[today]}`:"");
-}
-renderWork();
-
 /* ===== 하원 일정 =====
    월~금 정해진 시각에 아이 둘을 데리러 간다. 법정 공휴일은 하원이 없다.
    알림은 브라우저 탭이 열려 있을 때만 동작한다(웹의 한계). 실제 알람은 폰 알람 앱을 권장. */
@@ -3646,9 +3582,8 @@ function applyNewDay(prev){
   if(eyeSel===prev)eyeSel=today;
   if($("schedDate").value===prev)$("schedDate").value=today;
   if(mkYmd(eyeCur).slice(0,7)===prev.slice(0,7))eyeCur=firstOfThisMonth();
-  if(mkYmd(wkCur).slice(0,7)===prev.slice(0,7))wkCur=firstOfThisMonth();
 
-  renderEye();renderWork();renderFoods();renderMarketCal();renderPickup();
+  renderEye();renderFoods();renderMarketCal();renderPickup();
   renderExpAll(); // 월 지출 목록의 오늘·지난 날짜 표시(expDayCls)
   renderScheds(); // 구글 일정 목록은 '오늘 이후'만 보여주므로 날이 바뀌면 다시 그린다
   if(gcalOn())gcalRefresh();

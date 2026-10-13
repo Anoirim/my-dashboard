@@ -37,12 +37,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 탭 (`data-dept`) | 카드 |
 |---|---|
-| 총무부 (`general`) | 타이머, 하원 일정, 스케줄러, 안약 복용(달력 — 일정·결제일·근무 함께 표시), 식품 재고, 근무 일정(안약 달력에 통합, 제거 예정) |
+| 총무부 (`general`) | 타이머, 하원 일정, 스케줄러, 안약 복용(달력 — 일정·결제일·근무 함께 표시), 식품 재고 |
 | 투자연구소 (`research`) | 시장 일정, 손절 후 재매수 계산, 주식 분석 |
 | 재무부 (`fin`) | 내 계좌 현황(체결 조회·실현손익·보유종목·자산 추이), 목표 현금 만들기, 입출금·배당 기록 |
 | 관리부 (`mgmt`) | 월 지출 관리 |
 
-예전 `health`(보건실) 탭은 총무부로 흡수됐고 `switchDept`가 `health`를 `general`로 돌린다.
+예전 `health`(보건실) 탭은 총무부로 흡수됐고 `switchDept`가 `health`를 `general`로 돌린다. 예전 근무 일정 카드는 안약 달력에 통합돼 없어졌다.
 
 ### 영속화: localStorage 단일 소스 + 파일 미러
 
@@ -64,7 +64,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `eye_YYYY-MM-DD` | 날짜별 안약 복용 `[bool×4]` (오전 코솝·알파간, 오후 코솝·알파간) |
 | `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?, cashHand?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=통장, `cashHand`=현금), 보던 달. 규칙은 `### 월 지출 관리` 절 |
 | `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
-| `workOverrides` | 근무 일정 날짜별 예외 |
+| `workOverrides` | 근무 일정 날짜별 예외(요일 규칙과 다른 날만: 근무처 이름 \| `off` \| `leave`). 안약 달력 패널에서 바꾼다 |
 | `pickupTime`, `pickupSkips`, `pickupAlarm` | 하원 시각, 하원 없는 날, 알림 on/off |
 | `holdTargets` | 보유종목별 목표 입력(가격/%·수량) |
 | `realizedHist` | 일별 실현손익 보존본(KIS가 3개월 지난 행의 세금을 0으로 주기 때문) |
@@ -114,11 +114,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - 없는 달(미래 달 등)은 `loadMonth`처럼 직전 달 기준(체크는 다시 포함, 청구액 0)으로 본다. 결제일이 그 달 말일보다 크면 말일로 당긴다
   - 지출이 바뀌면 `renderExpAll()` 끝에서 `renderEye()`를 불러 달력에 반영한다
 
-### 안약 달력 = 근무 일정 통합
+### 안약 달력 = 근무 일정 (별도 근무 일정 카드 없음)
 
 - 안약 달력 칸 윗줄(`.eye-top`)에 근무처 칩(`workChip`: 근무처·연차·직접 지정 휴무, 기본 휴무는 표시 안 함)을, 아래에 공휴일 이름(`.wk-hol`)을 붙이고 일요일·공휴일 날짜는 빨갛게 한다. 휴대폰(600px 이하)에서는 칩 글자를 앞 두 글자(`.ws`)로 줄인다
-- 날짜 패널의 "근무" 선택칸(`workOptions`)으로 그날 근무처를 바꾼다. 근무 일정 카드와 같은 `applyWorkEdit()`를 써서 `workOverrides`에 저장하고 두 달력을 함께 다시 그린다. 달 요약(`workSummary`)은 달력 아래 `eyeWork`
-- 근무표 데이터(`WORK_SHIFTS`·`HOLIDAYS`·`REST_KINDS`·`workOverrides`·`shiftOn`·`restKind`·`tint`와 위 공용 함수)는 안약 블록 앞 `/* ===== 근무 일정 — 데이터 ===== */`에 있다(TDZ). 근무 일정 카드 화면(`renderWork`)은 뒤쪽 `— 화면` 블록에 남아 있고, 사용자가 통합 확인 후 카드를 지울 예정
+- 날짜 패널의 "근무" 선택칸(`workOptions`)으로 그날 근무처를 바꾼다(`applyWorkEdit()` → `workOverrides` 저장, "기본"을 고르면 지정 삭제). 달력 아래에 오늘 근무·범례(`workLegendHtml` → `eyeWorkLegend`)와 달 요약(`workSummary` → `eyeWork`)
+- 근무표 데이터(`WORK_SHIFTS`·`HOLIDAYS`·`REST_KINDS`·`workOverrides`·`shiftOn`·`restKind`·`tint`와 위 공용 함수)는 안약 블록 앞 `/* ===== 근무 일정 — 데이터 ===== */`에 있다(TDZ). 공휴일(`HOLIDAYS`)은 하원 일정도 쓴다. 근무처가 바뀌면 `WORK_SHIFTS`의 요일 배열만 고치면 된다
 
 ### 보유종목 표 (`renderHoldings`)
 
