@@ -2402,7 +2402,9 @@ function renderHoldings(hs){
       if(e&&e.v>0){ const T=htTargetPrice(h,e); totGain+=(T*(1-fee-tax)-h.avg*(1+fee))*(e.qty>0?e.qty:h.qty); }
     }
     const up=(h.pnl||0)>=0;
-    const delta=`(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)}/${up?"+":""}${h.pnlRate}%)`; dw=Math.max(dw,delta.length);
+    const delta=`(${h.price-h.avg>=0?"+":""}${won(h.price-h.avg)}/${up?"+":""}${h.pnlRate}%)`;
+    const bepTxt=`(${won(bep)})`; // 본전가는 매입가 옆 괄호 열에 둔다
+    dw=Math.max(dw,delta.length,bepTxt.length);
     const pnlTxt=`(${up?"+":""}${won(h.pnl)})`; dw2=Math.max(dw2,pnlTxt.length);
     // 총손익이 0에 가까우면 기여도가 폭주해 숫자가 무의미해진다
     const contrib=Math.abs(sumPnl)<1?null:ratio(h.pnl||0,sumPnl);
@@ -2425,10 +2427,9 @@ function renderHoldings(hs){
       <td class="c"><span class="hold-link" onclick="analyzeHolding('${h.code}')" title="주식분석에서 조회">${h.name}</span><span style="color:var(--muted);font-size:10px"> ${h.code}</span></td>
       <td class="c">${h.qty.toLocaleString()}</td>
       <td><div class="pricecell">
-        <span>${won(h.avg)}</span><span></span>
+        <span>${won(h.avg)}</span><span class="delta" style="color:var(--muted)">${bepTxt}</span>
         <span class="${h.price>=h.avg?"up":"down"}">${won(h.price)}</span>
         <span class="delta ${h.price>=h.avg?"up":"down"}">${delta}</span>
-        <span style="color:var(--muted)">${won(bep)}</span><span></span>
         <span style="color:var(--accent2)">${won(target)}</span><span></span>
       </div></td>
       <td><div class="pricecell amt">
@@ -2459,9 +2460,8 @@ function renderHoldings(hs){
     <thead><tr>
       <th class="c">계좌</th><th class="c">종목</th><th class="c">수량</th>
       <th><div class="pricecell">
-        <span>매입가</span><span></span>
+        <span>매입가</span><span class="delta">(본전가)</span>
         <span>현재가</span><span class="delta">(증감/손익률)</span>
-        <span>본전가</span><span></span>
         <span>목표가</span><span class="delta">(+${$("hTarget").value}%)</span>
       </div></th>
       <th><div class="pricecell amt">
@@ -2475,8 +2475,8 @@ function renderHoldings(hs){
     <tfoot><tr>
       <td class="l" colspan="3">합계 <span class="${tup?"up":"down"}">${tup?"+":""}${(totCost?totPnl/totCost*100:0).toFixed(2)}%</span></td>
       <td title="모든 종목이 목표가에 도달했을 때의 평가금액 합계 (목표가 × 보유수량)"><div class="pricecell">
-        <!-- 합계는 목표가에만 의미가 있으므로 목표가 줄(4단째) 높이에 둔다. 빈 줄은 &nbsp;로 높이를 유지 -->
-        <span>&nbsp;</span><span></span><span>&nbsp;</span><span></span><span>&nbsp;</span><span></span>
+        <!-- 합계는 목표가에만 의미가 있으므로 목표가 줄(3단째) 높이에 둔다. 빈 줄은 &nbsp;로 높이를 유지 -->
+        <span>&nbsp;</span><span></span><span>&nbsp;</span><span></span>
         <span style="color:var(--accent2)">${won(totTarget)}</span><span class="delta" style="color:var(--muted)">목표 평가</span>
       </div></td>
       <td><div class="pricecell amt">
