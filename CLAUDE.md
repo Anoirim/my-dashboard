@@ -66,6 +66,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
 | `workOverrides` | 근무 일정 날짜별 예외(요일 규칙과 다른 날만: 근무처 이름 \| `off` \| `leave`). 안약 달력 패널에서 바꾼다 |
 | `pickupTime`, `pickupSkips`, `pickupAlarm` | 하원 시각, 하원 없는 날, 알림 on/off |
+| `eyeWaitSec`, `eyeGapSec`, `eyeAutoTimer` | 안약 연쇄 타이머 — 점안 후 눈 감는 시간(기본 130초), 약 사이 간격(기본 600초), 자동 시작 on/off |
 | `holdTargets` | 보유종목별 목표 입력(가격/%·수량) |
 | `realizedHist` | 일별 실현손익 보존본(KIS가 3개월 지난 행의 세금을 0으로 주기 때문) |
 | `cashFlows` | 입출금·배당 기록 |
@@ -119,6 +120,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 안약 달력 칸 윗줄(`.eye-top`)에 근무처 칩(`workChip`: 근무처·연차·직접 지정 휴무, 기본 휴무는 표시 안 함)을, 아래에 공휴일 이름(`.wk-hol`)을 붙이고 일요일·공휴일 날짜는 빨갛게 한다. 휴대폰(600px 이하)에서는 칩 글자를 앞 두 글자(`.ws`)로 줄인다
 - 날짜 패널의 "근무" 선택칸(`workOptions`)으로 그날 근무처를 바꾼다(`applyWorkEdit()` → `workOverrides` 저장, "기본"을 고르면 지정 삭제). 달력 아래에 오늘 근무·범례(`workLegendHtml` → `eyeWorkLegend`)와 달 요약(`workSummary` → `eyeWork`)
 - 근무표 데이터(`WORK_SHIFTS`·`HOLIDAYS`·`REST_KINDS`·`workOverrides`·`shiftOn`·`restKind`·`tint`와 위 공용 함수)는 안약 블록 앞 `/* ===== 근무 일정 — 데이터 ===== */`에 있다(TDZ). 공휴일(`HOLIDAYS`)은 하원 일정도 쓴다. 근무처가 바뀌면 `WORK_SHIFTS`의 요일 배열만 고치면 된다
+
+### 안약 연쇄 타이머 (타이머 블록)
+
+점안하고 눈 감는 시간과 약 사이 간격을 타이머가 이어서 센다. 설정 칸은 총무부 타이머 카드 아래에 있다.
+
+- `toggleEye(i)`가 **오늘 날짜를 새로 체크**했을 때만 `startEyeTimer(i)`를 부른다(과거 소급 입력은 제외). 타이머 블록이 안약 블록보다 앞이라 이 호출 방향은 TDZ에 걸리지 않는다
+- `EYE_ITEMS` 인덱스로 단계를 정한다: 짝수(0·2 = 코솝)는 뒤에 알파간이 남아 `eyeChain="wait-drop"`, 홀수(1·3 = 알파간)는 그 시간대 마지막이라 `"wait-last"`
+- `fireAlarm()`이 `eyeChain`을 보고 분기한다. `wait-drop`이면 안내 후 `eyeChain="gap"`으로 바꿔 간격 타이머(`eyeGapSec`)를 바로 잇고, `gap`·`wait-last`면 안내만 하고 끝낸다. 연쇄가 아니면 기존 "타이머 종료!" 그대로
+- `setTimer`·`setTimerCustom`·`resetTimer`는 `eyeChain`을 비운다 — 안약과 무관하게 타이머를 쓰면 간격이 따라붙지 않게 한다
+- 타이머 재사용은 `runTimer(secs)`(= `pauseTimer` → 시간 설정 → `startTimer`)로 한 곳에 모았다. 중복 `setInterval`이 생기지 않는다
 
 ### 보유종목 표 (`renderHoldings`)
 

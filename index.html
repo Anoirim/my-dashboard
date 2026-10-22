@@ -282,6 +282,19 @@
         <button class="ok" id="startBtn" onclick="toggleTimer()">시작</button>
         <button class="ghost" onclick="resetTimer()">리셋</button>
       </div>
+      <!-- 안약을 체크하면 눈 감는 시간을 세고, 코솝이면 이어서 알파간까지의 간격도 센다 -->
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="checkbox" id="eyeAutoChk" onchange="toggleEyeAuto()">안약 체크하면 타이머 자동 시작
+        </label>
+        <div class="row" style="margin-top:8px;font-size:12px;color:var(--muted);align-items:center">
+          <span>눈 감기</span>
+          <input type="number" id="eyeWaitM" min="0" style="width:62px" onchange="setEyeTimerCfg()"><span>분</span>
+          <input type="number" id="eyeWaitS" min="0" max="59" style="width:62px" onchange="setEyeTimerCfg()"><span>초</span>
+          <span style="margin-left:6px">간격</span>
+          <input type="number" id="eyeGapM" min="1" style="width:62px" onchange="setEyeTimerCfg()"><span>분</span>
+        </div>
+      </div>
     </div>
 
     <!-- 하원 일정 (full 카드보다 앞에 둬야 같은 행에 놓인다) -->
@@ -650,8 +663,11 @@ function reloadAll(){
   pickupTime=localStorage.getItem("pickupTime")||PICKUP_DEFAULT;
   pickupSkips=JSON.parse(localStorage.getItem("pickupSkips")||"[]");
   pickupAlarm=localStorage.getItem("pickupAlarm")!=="off";
+  eyeWaitSec=+localStorage.getItem("eyeWaitSec")||EYE_WAIT_DEFAULT;
+  eyeGapSec=+localStorage.getItem("eyeGapSec")||EYE_GAP_DEFAULT;
+  eyeAutoTimer=localStorage.getItem("eyeAutoTimer")!=="off";
   renderScheds();renderEye();renderCashFlows();loadMonth(curMonth);
-  renderFoods();renderPickup();
+  renderFoods();renderPickup();renderEyeTimerCfg();
   // 보유종목은 잔고를 다시 받아야 하므로, 이미 받아둔 값이 있을 때만 다시 그린다
   if(typeof lastHoldings!=="undefined"&&lastHoldings.length)showHoldings(lastHoldings);
 }
@@ -754,19 +770,56 @@ async function initFileSync(){
 
 /* ===== 타이머 ===== */
 let total = 2*60, remain = total, tick = null, running = false, endTime = 0, fired = false;
+
+/* 안약 연쇄 타이머 — 점안하고 눈 감는 시간과 약 사이 간격을 이어서 센다.
+   코솝을 체크하면 대기 → 간격이 자동으로 이어지고, 알파간은 대기까지만 센다.
+   체크는 안약 블록의 toggleEye()가 startEyeTimer()를 부른다(타이머 블록이 앞이라 호출 방향이 안전). */
+const EYE_WAIT_DEFAULT=130, EYE_GAP_DEFAULT=600; // 2분 10초, 10분
+let eyeWaitSec=+localStorage.getItem("eyeWaitSec")||EYE_WAIT_DEFAULT;
+let eyeGapSec=+localStorage.getItem("eyeGapSec")||EYE_GAP_DEFAULT;
+let eyeAutoTimer=localStorage.getItem("eyeAutoTimer")!=="off";
+let eyeChain=""; // "" | "wait-drop"(코솝 뒤 대기) | "wait-last"(알파간 뒤 대기) | "gap"(약 사이 간격)
+function saveEyeTimerCfg(){
+  localStorage.setItem("eyeWaitSec",eyeWaitSec);
+  localStorage.setItem("eyeGapSec",eyeGapSec);
+  localStorage.setItem("eyeAutoTimer",eyeAutoTimer?"on":"off");
+  autoSaveFile();
+}
+function renderEyeTimerCfg(){
+  $("eyeAutoChk").checked=eyeAutoTimer;
+  $("eyeWaitM").value=Math.floor(eyeWaitSec/60); $("eyeWaitS").value=eyeWaitSec%60;
+  $("eyeGapM").value=Math.floor(eyeGapSec/60);
+  [$("eyeWaitM"),$("eyeWaitS"),$("eyeGapM")].forEach(el=>el.disabled=!eyeAutoTimer);
+}
+function toggleEyeAuto(){ eyeAutoTimer=$("eyeAutoChk").checked; if(!eyeAutoTimer)eyeChain=""; saveEyeTimerCfg(); renderEyeTimerCfg(); }
+function setEyeTimerCfg(){
+  const w=(parseInt($("eyeWaitM").value)||0)*60+(parseInt($("eyeWaitS").value)||0);
+  const g=(parseInt($("eyeGapM").value)||0)*60;
+  if(w>0)eyeWaitSec=w;
+  if(g>0)eyeGapSec=g;
+  saveEyeTimerCfg(); renderEyeTimerCfg();
+}
+// EYE_ITEMS 인덱스: 0,1=오전 / 2,3=오후, 짝수=코솝(뒤에 알파간이 남음) / 홀수=알파간(그 시간대 마지막)
+function startEyeTimer(i){
+  if(!eyeAutoTimer)return;
+  eyeChain=i%2===0?"wait-drop":"wait-last";
+  runTimer(eyeWaitSec);
+}
+function runTimer(secs){ pauseTimer(); total=remain=secs; render(); startTimer(); }
+function minSec(s){ const m=Math.floor(s/60), x=s%60; return (m?m+"분":"")+(x?(m?" ":"")+x+"초":(m?"":"0초")); }
 function fmt(s){
   const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
   const p=n=>String(n).padStart(2,"0");
   return (h>0?p(h)+":":"")+p(m)+":"+p(x);
 }
 function render(){$("timerDisplay").textContent = fmt(remain);}
-function setTimer(min){pauseTimer();total=remain=min*60;render();}
+function setTimer(min){eyeChain="";pauseTimer();total=remain=min*60;render();}
 function setTimerCustom(){
   const h=parseInt($("customH").value)||0;
   const m=parseInt($("customM").value)||0;
   const s=parseInt($("customS").value)||0;
   const secs=h*3600+m*60+s;
-  if(secs>0){pauseTimer();total=remain=secs;render();}
+  if(secs>0){eyeChain="";pauseTimer();total=remain=secs;render();}
 }
 function toggleTimer(){running?pauseTimer():startTimer();}
 function startTimer(){
@@ -786,9 +839,17 @@ function fireAlarm(){
   if(fired)return;fired=true;
   clearInterval(tick);running=false;remain=0;render();$("startBtn").textContent="시작";
   playAlarm();
+  // 안약 연쇄 중이면 단계에 맞는 안내를 띄우고, 코솝 뒤 대기였으면 약 사이 간격을 이어서 센다
+  const chain=eyeChain; eyeChain="";
+  const msg=chain==="wait-drop"?`눈 감기 끝 — ${minSec(eyeGapSec)} 뒤 알파간입니다`
+    :chain==="gap"?"알파간 넣을 시간입니다"
+    :chain==="wait-last"?"안약 끝났습니다"
+    :"설정한 시간이 끝났어요.";
+  const title=chain?"안약":"타이머 종료!";
   try{if(window.Notification&&Notification.permission==="granted")
-    new Notification("타이머 종료!",{body:"설정한 시간이 끝났어요."});}catch(e){}
-  setTimeout(()=>alert("타이머 종료!"),100);
+    new Notification(title,{body:msg});}catch(e){}
+  setTimeout(()=>alert(chain?msg:"타이머 종료!"),100);
+  if(chain==="wait-drop"){ eyeChain="gap"; runTimer(eyeGapSec); }
 }
 // 탭으로 돌아온 순간 정확한 남은 시간으로 복구하고, 이미 지났으면 그 자리에서 알린다
 document.addEventListener("visibilitychange",()=>{
@@ -816,8 +877,9 @@ function pauseTimer(){
   if(running&&endTime)remain=Math.max(0,Math.round((endTime-Date.now())/1000)); // 재개 시 이어지도록 남은 시간 확정
   clearInterval(tick);running=false;$("startBtn").textContent="시작";
 }
-function resetTimer(){pauseTimer();remain=total;render();}
+function resetTimer(){eyeChain="";pauseTimer();remain=total;render();}
 render();
+renderEyeTimerCfg();
 
 /* ===== 스케줄러 (localStorage + 구글 캘린더) =====
    날짜(date: YYYY-MM-DD)가 있는 일정은 안약 달력에도 병기한다.
@@ -1462,7 +1524,12 @@ function eyePayPanel(ymd){
 }
 // 패널의 "이 날짜로 일정 추가": 스케줄러 입력칸에 날짜를 넣고 할 일 칸으로 보낸다
 function addSchedOn(ymd){ $("schedDate").value=ymd; $("schedText").focus(); }
-function toggleEye(i){if(eyeSel>eyeToday())return;const st=loadEye(eyeSel);st[i]=!st[i];saveEye(st,eyeSel);renderEye();}
+function toggleEye(i){
+  if(eyeSel>eyeToday())return;
+  const st=loadEye(eyeSel);st[i]=!st[i];saveEye(st,eyeSel);renderEye();
+  // 오늘 날짜를 새로 체크했을 때만 눈 감기 타이머를 잇는다(과거 소급 입력은 제외)
+  if(st[i]&&eyeSel===eyeToday())startEyeTimer(i);
+}
 function resetEye(){if(eyeSel>eyeToday())return;saveEye(EYE_EMPTY.slice(),eyeSel);renderEye();}
 
 // 복용 수만큼 조각이 자라 원이 된다. 채우지 않은 부분은 비워 둔다.
