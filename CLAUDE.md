@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,600줄). Chart.js만 CDN(cdnjs) 로드
 - `api/kis.js` — KIS(한국투자증권) OpenAPI 프록시 + 한국은행 ECOS·Google 뉴스 RSS 중계. CommonJS 핸들러 1개 (약 600줄)
+- `api/sync.js` — 기기 사이 데이터 저장소(Upstash KV). 지금은 식품 재고만 쓴다 (`### 식품 재고 동기화`)
 
 줄 수가 계속 늘고 있으므로 위치는 줄 번호가 아니라 **함수명·블록 주석으로 찾을 것**.
 
@@ -63,7 +64,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `gcalCalSel`, `gcalTarget` | 보여줄 구글 캘린더 id 배열(없으면 구글 화면에서 켜 둔 캘린더), 새 일정을 만들 캘린더 id(없으면 기본 캘린더) |
 | `eye_YYYY-MM-DD` | 날짜별 안약 복용 `[bool×4]` (오전 코솝·알파간, 오후 코솝·알파간) |
 | `expData`, `curMonth` | 월 지출 `{ "YYYY-MM": {cards, fixed, oneoff?, cash?, cashHand?} }`(`oneoff`=카드외 비정기 `[{day,name,amt,inc}]`, `cash`=통장, `cashHand`=현금), 보던 달. 규칙은 `### 월 지출 관리` 절 |
-| `foods`, `fdLog` | 식품 재고, 소비/폐기 기록 |
+| `foods`, `fdLog` | 식품 재고, 소비/폐기 기록. `foods` 항목에는 기기 사이 비교용 `id`·`updatedAt`이 있고, 지운 항목은 `deletedAt`만 붙여 남긴다(`### 식품 재고 동기화`) |
 | `workOverrides` | 근무 일정 날짜별 예외(요일 규칙과 다른 날만: 근무처 이름 \| `off` \| `leave`). 안약 달력 패널에서 바꾼다 |
 | `pickupTime`, `pickupSkips`, `pickupAlarm` | 하원 시각, 하원 없는 날, 알림 on/off |
 | `eyeWaitSec`, `eyeGapSec`, `eyeAutoTimer` | 안약 연쇄 타이머 — 점안 후 눈 감는 시간(기본 130초), 약 사이 간격(기본 600초), 자동 시작 on/off |
@@ -120,6 +121,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 안약 달력 칸 윗줄(`.eye-top`)에 근무처 칩(`workChip`: 근무처·연차·직접 지정 휴무, 기본 휴무는 표시 안 함)을, 아래에 공휴일 이름(`.wk-hol`)을 붙이고 일요일·공휴일 날짜는 빨갛게 한다. 휴대폰(600px 이하)에서는 칩 글자를 앞 두 글자(`.ws`)로 줄인다
 - 날짜 패널의 "근무" 선택칸(`workOptions`)으로 그날 근무처를 바꾼다(`applyWorkEdit()` → `workOverrides` 저장, "기본"을 고르면 지정 삭제). 달력 아래에 오늘 근무·범례(`workLegendHtml` → `eyeWorkLegend`)와 달 요약(`workSummary` → `eyeWork`)
 - 근무표 데이터(`WORK_SHIFTS`·`HOLIDAYS`·`REST_KINDS`·`workOverrides`·`shiftOn`·`restKind`·`tint`와 위 공용 함수)는 안약 블록 앞 `/* ===== 근무 일정 — 데이터 ===== */`에 있다(TDZ). 공휴일(`HOLIDAYS`)은 하원 일정도 쓴다. 근무처가 바뀌면 `WORK_SHIFTS`의 요일 배열만 고치면 된다
+
+### 식품 재고 동기화 (`api/sync.js` + 식품 블록)
+
+휴대폰에서 넣은 재고를 PC에서도 보려고 **식품만** 서버에 둔다. 다른 데이터는 그대로 localStorage + 백업 파일이다.
+
+- `api/sync.js` — `GET/POST /api/sync?key=foods`. 키는 화이트리스트(`foods`·`fdLog`)로 막고, 인증은 `kis.js`와 같은 `x-dash-token`(`DASH_TOKEN` 미설정이면 통과), KV 미연결이면 503을 돌려준다
+  - `kis.js`의 `kvSet`은 토큰용이라 `EX`(만료)가 붙고 값을 URL 경로에 넣는다. 재고는 만료되면 안 되고 JSON이 길어서, `sync.js`에 만료 없는 POST 본문 방식(`kvSetRaw`)을 따로 뒀다
+- **삭제는 툼스톤** — 지운 항목을 배열에서 빼지 않고 `deletedAt`만 붙인다(`fdRemove`). 그러지 않으면 아직 동기화 안 된 기기가 "한쪽에만 있는 항목"을 새로 추가된 것으로 보고 되살린다. 30일(`FD_TOMB_DAYS`) 지난 툼스톤은 병합할 때 치운다
+- **병합(`fdMerge`)** — 같은 `id`는 `updatedAt`이 늦은 쪽, 한쪽에만 있으면 그대로 살린다. `id`가 없는 옛 항목은 `fdStamp`가 로드·복원 시 채운다
+- **시점** — `saveFoods()`가 저장할 때마다 조용히(`fdSync(true)`), 페이지 열 때와 탭 복귀 시에도 한 번. 식품 카드 머리글의 "↻ 동기화"는 수동 실행이고 결과를 `fdStat`에 적는다
+- 화면에서 툼스톤을 빼는 지점은 `renderFoods()`의 `idx` 한 곳뿐이다. 거기서 걸러지면 경고·개수·비축 목록이 모두 따라간다
+- `fdSync` 자동 호출은 **스크립트 맨 끝**(`initFileSync()` 뒤)에 둔다. `dashToken`이 식품 블록보다 뒤에 선언돼 있어 `fdSyncFetch`는 `typeof` 가드로 읽는다(TDZ)
 
 ### 안약 연쇄 타이머 (타이머 블록)
 

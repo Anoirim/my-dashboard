@@ -360,7 +360,9 @@
     <!-- 식품 재고 -->
     <div class="card full" data-dept="general">
       <h2><span class="dot" style="background:#f5a623"></span>식품 재고
-        <span id="fdStat" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+        <span id="fdStat" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span>
+        <button class="ghost" style="margin-left:8px;font-size:12px;padding:3px 9px"
+          onclick="fdSync()" title="다른 기기에서 넣은 재고를 받아 합칩니다">↻ 동기화</button></h2>
       <div id="fdWarn"></div>
       <div class="row" style="margin-bottom:6px">
         <input type="text" id="fdName" placeholder="품목 이름" style="flex:1;min-width:140px">
@@ -656,6 +658,7 @@ function reloadAll(){
   cashFlows=JSON.parse(localStorage.getItem("cashFlows")||"[]");
   curMonth=localStorage.getItem("curMonth")||curMonth;
   foods=JSON.parse(localStorage.getItem("foods")||"[]");
+  fdStamp(foods); // 예전 백업에는 id·updatedAt이 없어 동기화 비교가 안 된다
   fdLog=JSON.parse(localStorage.getItem("fdLog")||"[]");
   holdTargets=JSON.parse(localStorage.getItem("holdTargets")||"{}");
   realizedHist=JSON.parse(localStorage.getItem("realizedHist")||"{}");
@@ -1208,7 +1211,66 @@ const fdEsc=s=>String(s).replace(/</g,"&lt;");
 
 let foods=JSON.parse(localStorage.getItem("foods")||"[]");
 let fdLog=JSON.parse(localStorage.getItem("fdLog")||"[]");
-function saveFoods(){localStorage.setItem("foods",JSON.stringify(foods));autoSaveFile();}
+
+/* --- 기기 사이 동기화 (api/sync.js + Upstash) ---
+   휴대폰에서 넣은 재고를 PC에서도 보기 위한 것. 식품만 쓴다.
+   삭제는 항목을 지우지 않고 deletedAt을 남긴다(툼스톤). 그러지 않으면 아직 동기화 안 된 기기가
+   "한쪽에만 있는 항목"을 새로 추가된 것으로 보고 되살려 버린다. */
+const FD_TOMB_DAYS=30; // 지운 표시를 이만큼 지나면 실제로 치운다
+let fdSyncing=false, fdSyncMsg="";
+const fdNewId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const fdNow=()=>new Date().toISOString();
+// 예전에 넣은 항목에는 id·updatedAt이 없다. 비교할 수 있게 채워 준다.
+function fdStamp(a){
+  let changed=false;
+  a.forEach(f=>{ if(!f.id){f.id=fdNewId();changed=true;} if(!f.updatedAt){f.updatedAt=f.inDate?f.inDate+"T00:00:00.000Z":fdNow();changed=true;} });
+  return changed;
+}
+// 같은 id는 updatedAt이 늦은 쪽을 쓴다. 한쪽에만 있으면 그대로 살린다.
+function fdMerge(mine,theirs){
+  const map=new Map();
+  [...mine,...theirs].forEach(f=>{
+    if(!f||!f.id)return;
+    const old=map.get(f.id);
+    if(!old||String(f.updatedAt||"")>String(old.updatedAt||""))map.set(f.id,f);
+  });
+  const cut=new Date(Date.now()-FD_TOMB_DAYS*864e5).toISOString();
+  return [...map.values()].filter(f=>!(f.deletedAt&&f.deletedAt<cut));
+}
+async function fdSyncFetch(key,method,body){
+  // dashToken은 이 블록보다 뒤에서 선언된다(TDZ). 아직 없으면 토큰 없이 보낸다.
+  const tok=typeof dashToken!=="undefined"?dashToken:(localStorage.getItem("dashToken")||"");
+  const r=await fetch(`/api/sync?key=${key}`,{
+    method, headers:{...(tok?{"x-dash-token":tok}:{}),...(body?{"Content-Type":"application/json"}:{})},
+    ...(body?{body:JSON.stringify(body)}:{})
+  });
+  const j=await r.json().catch(()=>({error:"응답을 읽지 못했습니다."}));
+  if(!r.ok)throw new Error(j.error||("HTTP "+r.status));
+  return j;
+}
+// 받아서 합치고, 합친 결과를 다시 올린다. 양쪽 변경이 모두 남는다.
+async function fdSync(quiet){
+  if(fdSyncing)return;
+  fdSyncing=true; if(!quiet){fdSyncMsg="동기화 중…";renderFoods();}
+  try{
+    fdStamp(foods);
+    const got=await fdSyncFetch("foods","GET");
+    const merged=fdMerge(foods,Array.isArray(got.data)?got.data:[]);
+    foods=merged;
+    localStorage.setItem("foods",JSON.stringify(foods));
+    await fdSyncFetch("foods","POST",foods);
+    fdSyncMsg="동기화 "+new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
+  }catch(e){
+    fdSyncMsg="동기화 실패: "+e.message;
+  }
+  fdSyncing=false; renderFoods();
+}
+function saveFoods(){
+  fdStamp(foods);
+  localStorage.setItem("foods",JSON.stringify(foods));
+  autoSaveFile();
+  fdSync(true); // 저장할 때마다 조용히 맞춘다(실패해도 로컬은 이미 저장됨)
+}
 function saveFdLog(){localStorage.setItem("fdLog",JSON.stringify(fdLog));autoSaveFile();}
 
 // 유통기한: 직접 입력값이 있으면 그것을, 없으면 담은 날 + 유형 기본일수
@@ -1257,18 +1319,20 @@ function addFood(){
   const t=fdType($("fdType").value);
   const exp=$("fdExp").value;
   if(t.days==null&&!exp){$("fdExpHint").textContent="유통기한을 입력해 주세요";return;}
-  foods.push({name,type:t.id,place:$("fdPlace").value,inDate:fdToday(),expiry:t.days==null?exp:"",photo:""});
+  foods.push({id:fdNewId(),updatedAt:fdNow(),name,type:t.id,place:$("fdPlace").value,inDate:fdToday(),expiry:t.days==null?exp:"",photo:""});
   $("fdName").value="";$("fdExp").value="";
   saveFoods();renderFoods();
 }
+// 지운 자리를 바로 비우지 않고 표시만 남긴다. 다른 기기가 되살리지 않게 하기 위함이다.
+function fdRemove(f){ if(!f)return; f.deletedAt=fdNow(); f.updatedAt=f.deletedAt; }
 // eaten=true 먹음 / false 버림. 버린 개수는 월별로 세어 행동 교정에 쓴다.
 function doneFood(i,eaten){
   const f=foods[i];if(!f)return;
   fdLog.push({name:f.name,type:f.type,eaten,date:fdToday()});
-  foods.splice(i,1);
+  fdRemove(f);
   saveFdLog();saveFoods();renderFoods();
 }
-function delFood(i){foods.splice(i,1);saveFoods();renderFoods();}
+function delFood(i){fdRemove(foods[i]);saveFoods();renderFoods();}
 
 function fdRow(f,i){
   const d=fdDday(f), lb=fdLabel(d);
@@ -1283,8 +1347,8 @@ function fdRow(f,i){
   </div>`;
 }
 function renderFoods(){
-  // 원본 인덱스를 유지해야 버튼이 올바른 항목을 가리킨다
-  const idx=foods.map((f,i)=>i);
+  // 원본 인덱스를 유지해야 버튼이 올바른 항목을 가리킨다. 지운 표시(deletedAt)만 빼고 본다
+  const idx=foods.map((f,i)=>i).filter(i=>!foods[i].deletedAt);
   const risk=f=>{const d=fdDday(f);return d==null?9999:d;};
   idx.sort((a,b)=>risk(foods[a])-risk(foods[b]));
   const urgent=idx.filter(i=>fdUrgent(foods[i]));
@@ -1310,7 +1374,8 @@ function renderFoods(){
   const mon=fdToday().slice(0,7);
   const tossed=fdLog.filter(l=>!l.eaten&&l.date.startsWith(mon)).length;
   const ate=fdLog.filter(l=>l.eaten&&l.date.startsWith(mon)).length;
-  $("fdStat").textContent=`총 ${foods.length}개 · 이번 달 먹음 ${ate} / 버림 ${tossed}`;
+  $("fdStat").textContent=`총 ${idx.length}개 · 이번 달 먹음 ${ate} / 버림 ${tossed}`
+    +(fdSyncMsg?` · ${fdSyncMsg}`:"");
 
   const badge=over.length+soon.length;
   const tab=document.querySelector('.dept-tab[data-tab="general"]');
@@ -3684,6 +3749,11 @@ gcalStatus(""); if(gcalOn())gcalRefresh();
 /* ===== 자동 기록 초기화 (마지막에 실행) ===== */
 $("apiKey").addEventListener("change",()=>autoSaveFile());
 initFileSync();
+
+// 식품 재고는 휴대폰에서도 넣으므로, 열 때와 탭으로 돌아올 때 조용히 맞춘다.
+// 모든 선언이 끝난 뒤라야 하므로 스크립트 맨 끝에 둔다(TDZ).
+fdSync(true);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)fdSync(true);});
 </script>
 </body>
 </html>
