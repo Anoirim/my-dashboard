@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- 홈 화면 아이콘. 대시보드 테마색(배경·accent·accent2)을 그대로 쓴다 -->
+  <rect width="512" height="512" rx="96" fill="#0f1420"/>
+  <rect x="24" y="24" width="464" height="464" rx="76" fill="none" stroke="#2a3346" stroke-width="8"/>
+  <g>
+    <rect x="128" y="300" width="56" height="92" rx="14" fill="#4f8cff"/>
+    <rect x="228" y="236" width="56" height="156" rx="14" fill="#33d69f"/>
+    <rect x="328" y="164" width="56" height="228" rx="14" fill="#4f8cff"/>
+  </g>
+  <circle cx="356" cy="132" r="22" fill="#33d69f"/>
+</svg>

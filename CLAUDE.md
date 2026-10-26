@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,600줄). Chart.js만 CDN(cdnjs) 로드
 - `api/kis.js` — KIS(한국투자증권) OpenAPI 프록시 + 한국은행 ECOS·Google 뉴스 RSS 중계. CommonJS 핸들러 1개 (약 600줄)
 - `api/sync.js` — 기기 사이 데이터 저장소(Upstash KV). 지금은 식품 재고만 쓴다 (`### 식품 재고 동기화`)
+- `manifest.json` · `sw.js` · `icon.svg` — 홈 화면에 추가(PWA)용. 서비스 워커는 **캐시를 두지 않는다**(`sw.js` 주석). 배포한 새 코드가 바로 보여야 하기 때문이다. `icon.svg`는 XML이라 주석 안에 `--`를 쓰면 파싱이 깨진다
 
 줄 수가 계속 늘고 있으므로 위치는 줄 번호가 아니라 **함수명·블록 주석으로 찾을 것**.
 

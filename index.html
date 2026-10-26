@@ -2,8 +2,17 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>나의 대시보드</title>
+<!-- 홈 화면에 추가하면 앱처럼 열린다. 서비스 워커는 캐시 없이 등록만 한다(sw.js 주석 참고) -->
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="theme-color" content="#0f1420">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="대시보드">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root{
@@ -3754,6 +3763,11 @@ initFileSync();
 // 모든 선언이 끝난 뒤라야 하므로 스크립트 맨 끝에 둔다(TDZ).
 fdSync(true);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)fdSync(true);});
+
+// 홈 화면에 추가(PWA)용. file://과 비보안 출처에서는 등록되지 않으므로 조용히 넘어간다.
+if("serviceWorker" in navigator && location.protocol!=="file:"){
+  navigator.serviceWorker.register("/sw.js").catch(()=>{});
+}
 </script>
 </body>
 </html>
