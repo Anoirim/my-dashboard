@@ -196,6 +196,8 @@
   .sched-item.exp-today .time{font-weight:800}
   .sched-item.exp-today .time::after{content:"오늘";margin-left:4px;font-size:10px;font-weight:800;
     background:var(--accent);color:#fff;border-radius:4px;padding:1px 4px;vertical-align:1px}
+  /* 수정 중인 줄(입력칸으로 불러온 항목). "저장"을 눌러야 바뀐다 */
+  .sched-item.editing{outline:2px dashed var(--accent);outline-offset:-2px}
   .sched-item.exp-past{filter:saturate(.35) brightness(.75)}
   .exp-edit{color:var(--accent)!important;border:none;background:transparent;cursor:pointer;padding:4px 6px;font-size:13px}
   .cat-tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(79,140,255,.15);color:var(--accent)}
@@ -549,7 +551,8 @@
         </select>
         <input type="number" id="cfAmt" placeholder="금액(원)" style="width:140px">
         <input type="text" id="cfMemo" placeholder="메모 (선택)" style="flex:1">
-        <button onclick="addCashFlow()">추가</button>
+        <button id="cfAddBtn" onclick="addCashFlow()">추가</button>
+        <button class="ghost" id="cfCancelBtn" onclick="cancelCfEdit()" style="display:none">취소</button>
       </div>
       <ul class="sched-list" id="cfList" style="margin-top:0;max-height:260px"></ul>
       <div class="hint" id="cfSum" style="margin-top:8px"></div>
@@ -573,7 +576,8 @@
         <input type="number" id="cardDay" min="1" max="31" placeholder="결제일" style="width:80px">
         <input type="text" id="cardName" placeholder="카드명 (예: 신한카드)" style="flex:1">
         <input type="number" id="cardBill" placeholder="청구액(원)·선택" style="width:140px">
-        <button onclick="addCard()">추가</button>
+        <button id="cardAddBtn" onclick="addCard()">추가</button>
+        <button class="ghost" id="cardCancelBtn" onclick="endExpEdit('card')" style="display:none">취소</button>
       </div>
       <!-- 월 지출 목록(카드·정기·카드외 비정기)은 개수가 늘어도 스크롤 없이 전부 펼쳐 보인다 -->
       <ul class="sched-list" id="cardList" style="margin-top:0;max-height:none;overflow:visible"></ul>
@@ -596,7 +600,8 @@
           <option>교통</option><option>기타</option>
         </select>
         <select id="fxMethod" style="width:130px"></select>
-        <button onclick="addFixed()">추가</button>
+        <button id="fxAddBtn" onclick="addFixed()">추가</button>
+        <button class="ghost" id="fxCancelBtn" onclick="endExpEdit('fixed')" style="display:none">취소</button>
       </div>
       <ul class="sched-list" id="fxList" style="margin-top:0;max-height:none;overflow:visible"></ul>
 
@@ -611,7 +616,8 @@
         <input type="number" id="ooDay" min="1" max="31" placeholder="날짜" style="width:80px">
         <input type="text" id="ooName" placeholder="항목명 (예: 경조사비, 병원비)" style="flex:1">
         <input type="number" id="ooAmt" placeholder="금액(원)" style="width:120px">
-        <button onclick="addOneoff()">추가</button>
+        <button id="ooAddBtn" onclick="addOneoff()">추가</button>
+        <button class="ghost" id="ooCancelBtn" onclick="endExpEdit('oneoff')" style="display:none">취소</button>
       </div>
       <ul class="sched-list" id="ooList" style="margin-top:0;max-height:none;overflow:visible"></ul>
 
@@ -664,7 +670,7 @@ function backupData(){
 function reloadAll(){
   expData=JSON.parse(localStorage.getItem("expData")||"{}");
   scheds=JSON.parse(localStorage.getItem("scheds")||"[]");
-  cashFlows=JSON.parse(localStorage.getItem("cashFlows")||"[]");
+  cashFlows=JSON.parse(localStorage.getItem("cashFlows")||"[]"); setCfEdit(null);
   curMonth=localStorage.getItem("curMonth")||curMonth;
   foods=JSON.parse(localStorage.getItem("foods")||"[]");
   fdStamp(foods); // 예전 백업에는 id·updatedAt이 없어 동기화 비교가 안 된다
@@ -1685,7 +1691,22 @@ const esc=s=>s.replace(/</g,"&lt;");
 let expData=JSON.parse(localStorage.getItem("expData")||"{}");
 let curMonth=localStorage.getItem("curMonth")||new Date().toISOString().slice(0,7); // YYYY-MM
 let cards=[], fixed=[], oneoff=[]; // oneoff: 카드외 비정기 [{day,name,amt,inc}]
-let fxEditInc=true; // 정기지출 수정 시 체크 상태를 유지하기 위한 임시 보관
+// 수정 중인 항목(객체 참조). 수정을 누르면 항목은 목록에 그대로 두고 입력칸으로 불러오며, "저장"을 눌러야 바뀐다.
+// 예전에는 누르는 순간 목록에서 지우고 저장해서, 저장하지 않고 떠나면 항목이 사라졌다.
+const expEdit={card:null,fixed:null,oneoff:null};
+const EXP_EDIT_UI={card:["cardAddBtn","cardCancelBtn",["cardName","cardBill","cardDay"]],
+  fixed:["fxAddBtn","fxCancelBtn",["fxName","fxAmt","fxDay"]],oneoff:["ooAddBtn","ooCancelBtn",["ooName","ooAmt","ooDay"]]};
+function setExpEdit(kind,obj){
+  expEdit[kind]=obj;
+  const [a,c]=EXP_EDIT_UI[kind];
+  $(a).textContent=obj?"저장":"추가"; $(c).style.display=obj?"":"none";
+}
+// 수정 취소(또는 저장 후): 입력칸을 비우고 추가 모드로 돌린다
+function endExpEdit(kind,keepInputs){
+  if(!keepInputs)EXP_EDIT_UI[kind][2].forEach(id=>$(id).value="");
+  const was=expEdit[kind]; setExpEdit(kind,null);
+  if(was&&!keepInputs)renderExpAll();
+}
 
 // 기존(월 구분 없던) 데이터 이월
 if(!expData[curMonth] && (localStorage.getItem("cards")||localStorage.getItem("fixed"))){
@@ -1733,8 +1754,9 @@ function renderExpCash(){
 
 function loadMonth(m){
   if(!m)return;
+  Object.keys(expEdit).forEach(k=>{if(expEdit[k])endExpEdit(k,true);}); // 다른 달 항목을 덮어쓰지 않게
   curMonth=m; localStorage.setItem("curMonth",m);
-  if(expData[m]){cards=expData[m].cards; fixed=expData[m].fixed; oneoff=expData[m].oneoff||[]; autoSaveFile();} // curMonth 변경을 미러 (신규 월은 아래 saveExpData가 커버)
+  if(expData[m]){cards=expData[m].cards; fixed=expData[m].fixed; oneoff=expData[m].oneoff||[]; autoSaveFile();} // curMonth 변경을 미러
   else{
     // 직전(가장 최근 이전) 달에서 정기지출·카드 이월 (청구액은 0으로 초기화)
     const prev=Object.keys(expData).filter(k=>k<m).sort().pop();
@@ -1744,7 +1766,9 @@ function loadMonth(m){
       fixed=JSON.parse(JSON.stringify(expData[prev].fixed)).map(f=>Object.assign(f,{inc:true}));
     }else{cards=[];fixed=[];}
     oneoff=[]; // 카드외 비정기는 그달 일회성이라 이월하지 않는다
-    saveExpData();
+    // 열어보기만 한 달은 저장하지 않는다. 저장하면 정기지출 추정치가 월별 지출 추이에 실제 지출처럼 잡힌다.
+    // 이 달에서 항목을 추가·수정·체크하거나 보유금액을 넣는 순간 saveExpData가 그 달을 만든다
+    autoSaveFile(); // curMonth 변경만 파일 미러에 반영
   }
   $("monthSel").value=curMonth;
   renderExpAll();
@@ -1756,13 +1780,18 @@ function addCard(){
   const bill=parseFloat($("cardBill").value)||0;
   const day=parseInt($("cardDay").value)||0;
   if(!name)return;
-  const ex=cards.find(c=>c.name===name);
-  if(ex){ex.bill=bill;ex.day=day;} else cards.push({name,bill,day,inc:true});
-  $("cardName").value="";$("cardBill").value="";$("cardDay").value="";
+  const ed=expEdit.card, ex=cards.find(c=>c.name===name&&c!==ed);
+  if(ed){
+    if(ex){alert("같은 이름의 카드가 이미 있습니다.");return;}
+    // 카드 이름을 바꾸면 그 카드로 내던 정기지출의 결제수단도 따라 바꾼다(옛 이름에 남으면 계산에서 빠진다)
+    if(ed.name!==name)fixed.forEach(f=>{if(f.method===ed.name)f.method=name;});
+    Object.assign(ed,{name,bill,day});
+  }else if(ex){ex.bill=bill;ex.day=day;} else cards.push({name,bill,day,inc:true});
+  endExpEdit("card",true); $("cardName").value="";$("cardBill").value="";$("cardDay").value="";
   saveExpData();renderExpAll();
 }
-function editCard(i){$("cardName").value=cards[i].name;$("cardBill").value=cards[i].bill;$("cardDay").value=cards[i].day||"";cards.splice(i,1);saveExpData();renderExpAll();}
-function delCard(i){const nm=cards[i].name;cards.splice(i,1);fixed.forEach(f=>{if(f.method===nm)f.method="계좌/현금";});saveExpData();renderExpAll();}
+function editCard(i){const c=cards[i];$("cardName").value=c.name;$("cardBill").value=c.bill;$("cardDay").value=c.day||"";setExpEdit("card",c);renderExpAll();$("cardName").focus();}
+function delCard(i){const c=cards[i],nm=c.name;if(expEdit.card===c)endExpEdit("card",false);cards.splice(i,1);fixed.forEach(f=>{if(f.method===nm)f.method="계좌/현금";});saveExpData();renderExpAll();}
 function toggleCard(i){cards[i].inc=!cards[i].inc;saveExpData();renderExpAll();}
 
 // 정기지출
@@ -1773,13 +1802,13 @@ function addFixed(){
   const method=$("fxMethod").value||"계좌/현금";
   const cat=$("fxCat").value||"기타";
   if(!name||amt<=0)return;
-  fixed.push({name,amt,day,method,cat,inc:fxEditInc});
-  fxEditInc=true; // 수정으로 들어온 체크 상태는 한 번만 이어받는다
-  $("fxName").value="";$("fxAmt").value="";$("fxDay").value="";
+  if(expEdit.fixed)Object.assign(expEdit.fixed,{name,amt,day,method,cat}); // 체크 상태는 그대로 둔다
+  else fixed.push({name,amt,day,method,cat,inc:true});
+  endExpEdit("fixed",true); $("fxName").value="";$("fxAmt").value="";$("fxDay").value="";
   saveExpData();renderExpAll();
 }
-function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value=f.amt;$("fxDay").value=f.day||"";if(f.cat)$("fxCat").value=f.cat;buildMethodOptions(f.method);fxEditInc=f.inc!==false;fixed.splice(i,1);saveExpData();renderExpAll();}
-function delFixed(i){fixed.splice(i,1);saveExpData();renderExpAll();}
+function editFixed(i){const f=fixed[i];$("fxName").value=f.name;$("fxAmt").value=f.amt;$("fxDay").value=f.day||"";if(f.cat)$("fxCat").value=f.cat;buildMethodOptions(f.method);setExpEdit("fixed",f);renderExpAll();$("fxName").focus();}
+function delFixed(i){if(expEdit.fixed===fixed[i])endExpEdit("fixed",false);fixed.splice(i,1);saveExpData();renderExpAll();}
 // 체크를 끄면 그 달 합계·카드 정기분에서 빠진다. 값이 없는 기존 데이터는 포함으로 본다.
 const fxInc=f=>f.inc!==false;
 // 카드별 청구액 분해. 실제 청구된 금액인 청구액을 정기지출(예상)보다 우선한다.
@@ -1803,12 +1832,13 @@ function toggleFixed(i){fixed[i].inc=!fxInc(fixed[i]);saveExpData();renderExpAll
 function addOneoff(){
   const name=$("ooName").value.trim(), amt=parseFloat($("ooAmt").value)||0, day=parseInt($("ooDay").value)||0;
   if(!name||!(amt>0))return;
-  oneoff.push({day,name,amt,inc:true});
-  $("ooName").value="";$("ooAmt").value="";$("ooDay").value="";
+  if(expEdit.oneoff)Object.assign(expEdit.oneoff,{day,name,amt});
+  else oneoff.push({day,name,amt,inc:true});
+  endExpEdit("oneoff",true); $("ooName").value="";$("ooAmt").value="";$("ooDay").value="";
   saveExpData();renderExpAll();
 }
-function editOneoff(i){const o=oneoff[i];$("ooName").value=o.name;$("ooAmt").value=o.amt;$("ooDay").value=o.day||"";oneoff.splice(i,1);saveExpData();renderExpAll();}
-function delOneoff(i){oneoff.splice(i,1);saveExpData();renderExpAll();}
+function editOneoff(i){const o=oneoff[i];$("ooName").value=o.name;$("ooAmt").value=o.amt;$("ooDay").value=o.day||"";setExpEdit("oneoff",o);renderExpAll();$("ooName").focus();}
+function delOneoff(i){if(expEdit.oneoff===oneoff[i])endExpEdit("oneoff",false);oneoff.splice(i,1);saveExpData();renderExpAll();}
 function toggleOneoff(i){oneoff[i].inc=oneoff[i].inc===false;saveExpData();renderExpAll();}
 
 function buildMethodOptions(sel){
@@ -1863,7 +1893,7 @@ function renderExpAll(){
   $("cardList").innerHTML=cards.map((c,i)=>{
     const on=c.inc!==false;
     const {fx:inc,fxAll,bill,etc,est,cut}=cardSplit(c,fixed);
-    return `<li class="sched-item ${expDayCls(c.day)}" draggable="true" style="${on?'':'opacity:.5'}"
+    return `<li class="sched-item ${expDayCls(c.day)} ${c===expEdit.card?'editing':''}" draggable="true" style="${on?'':'opacity:.5'}"
       ondragstart="dndStart('card',${i})" ondragover="dndOver(event,this)" ondragleave="dndLeave(this)" ondrop="dndDrop('card',${i},this)" ondragend="dndEnd()">
       <span class="drag" title="드래그로 순서 변경">⠿</span>
       <input type="checkbox" ${on?'checked':''} onchange="toggleCard(${i})" title="월 총지출 계산 포함">
@@ -1878,7 +1908,7 @@ function renderExpAll(){
   // 정기지출 리스트 (결제일 순 정렬)
   const order=[...fixed.keys()].sort((a,b)=>((fixed[a].day||99)-(fixed[b].day||99)));
   $("fxList").innerHTML=order.map(i=>{const f=fixed[i];const isCard=f.method!=="계좌/현금";const on=fxInc(f);
-    return `<li class="sched-item ${expDayCls(f.day)}" style="${on?'':'opacity:.5'}">
+    return `<li class="sched-item ${expDayCls(f.day)} ${f===expEdit.fixed?'editing':''}" style="${on?'':'opacity:.5'}">
       <input type="checkbox" ${on?'checked':''} onchange="toggleFixed(${i})" title="이 달 계산에 포함">
       <span class="time">${f.day?f.day+"일":"-"}</span>
       <span class="cat-tag">${esc(f.cat||"기타")}</span>
@@ -1916,7 +1946,7 @@ function renderExpAll(){
   // 카드외 비정기 목록 (날짜 순)
   const ooOrder=[...oneoff.keys()].sort((a,b)=>((oneoff[a].day||99)-(oneoff[b].day||99)));
   $("ooList").innerHTML=ooOrder.map(i=>{const o=oneoff[i];const on=o.inc!==false;
-    return `<li class="sched-item ${expDayCls(o.day)}" style="${on?'':'opacity:.5'}">
+    return `<li class="sched-item ${expDayCls(o.day)} ${o===expEdit.oneoff?'editing':''}" style="${on?'':'opacity:.5'}">
       <input type="checkbox" ${on?'checked':''} onchange="toggleOneoff(${i})" title="이 달 계산에 포함">
       <span class="time">${o.day?o.day+"일":"-"}</span>
       <span class="txt">${esc(o.name)}</span>
@@ -2157,15 +2187,17 @@ async function loadStockKR(silent){
     $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
     $("stockChg").className="chg "+(up?"up":"down");
     // 보유 중인 종목이면 매입가·본전가·손익을 함께 보인다(보유종목 표와 같은 기준).
-    const held=(lastHoldings||[]).find(h=>h.code===sym);
+    // 여러 계좌에 나눠 갖고 있으면 보유종목 표의 통합 행과 같게 합친다(수량 합계·가중평균 매입가·가중 수수료)
+    const heldRows=(lastHoldings||[]).filter(h=>h.code===sym);
+    const held=heldRows.length>1?mergeHoldings(heldRows):heldRows[0];
     let holdLine="", hAvg=0, hBep=0;
     if(held){
       const w=n=>Math.round(n).toLocaleString("ko-KR");
-      const fee=acctFee(held.account), tax=isEtfName(held.name)?0:0.002;
+      const fee=held.merged?held.fee:acctFee(held.account), tax=isEtfName(held.name)?0:0.002;
       hAvg=held.avg; hBep=held.avg*(1+fee)/(1-fee-tax);
       const pnl=(d.price-held.avg)*held.qty, rate=held.avg?(d.price/held.avg-1)*100:0;
       const col=pnl>=0?"var(--accent2)":"var(--danger)";
-      holdLine=`<br><b>보유</b> ${held.qty.toLocaleString()}주 · 매입가 ${w(hAvg)} · 본전가 ${w(hBep)} · 손익 <b style="color:${col}">${pnl>=0?"+":""}${w(pnl)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</b>`;
+      holdLine=`<br><b>보유</b>${held.merged?` (${held.account} 합계)`:""} ${held.qty.toLocaleString()}주 · 매입가 ${w(hAvg)} · 본전가 ${w(hBep)} · 손익 <b style="color:${col}">${pnl>=0?"+":""}${w(pnl)} (${rate>=0?"+":""}${rate.toFixed(2)}%)</b>`;
     }
     $("stockMeta").innerHTML=`고가 ${d.high.toLocaleString()} · 저가 ${d.low.toLocaleString()} · 시가 ${d.open.toLocaleString()} · 전일 ${d.prevClose.toLocaleString()}`+holdLine;
     $("stockResult").style.display="block";
@@ -2665,12 +2697,14 @@ function calcCashOut(){
   const target=parseFloat($("coTarget").value)||0;
   if(target<=0){msg.textContent="필요 금액을 입력하세요.";return;}
   const order=$("coOrder").value;
-  // 이미 가진 현금부터 쓴다. 인출 목적이므로 지금 뺄 수 있는 출금가능액 기준.
-  const cashNow=(lastBal&&lastBal.cash)||0;
-  const cashD2=(lastBal&&lastBal.cashD2)||0;
+  // 이미 가진 현금부터 쓴다. 예수금은 D+2 정산 기준(prvs_rcdl_excc_amt)으로 본다.
+  // 오늘 예수금(dnca_tot_amt)에는 아직 빠져나가지 않은 매수 대금이 남아 있어, 그대로 쓰면 쓸 수 있는 돈이 부풀려진다.
+  // 지금 파는 주식의 대금도 D+2에 들어오므로 같은 기준으로 맞춘다. 다른 화면(acctCash·총자산)과도 같은 값이다
+  const cashD0=(lastBal&&lastBal.cash)||0;
+  const cashNow=(lastBal&&(lastBal.cashD2||lastBal.cash))||0;
   const needCash=Math.max(0,target-cashNow);
   if(!needCash){
-    $("coWrap").innerHTML=`<div class="hint">보유 현금 ${wonKR(cashNow)}만으로 목표 ${wonKR(target)}를 채울 수 있어요. 팔 필요가 없습니다.</div>`;
+    $("coWrap").innerHTML=`<div class="hint">보유 현금(D+2 정산 기준) ${wonKR(cashNow)}만으로 목표 ${wonKR(target)}를 채울 수 있어요. 팔 필요가 없습니다.</div>`;
     msg.textContent="";return;
   }
   // 이익/손실 순은 수익률(주당 마진율)로 정렬한다. 같은 현금을 만들 때 실현손익은 수익률에 비례하므로,
@@ -2697,11 +2731,11 @@ function calcCashOut(){
     const fee=acctFee(h.account), net=coNet(h,fee), need=Math.ceil(needCash/net), qty=Math.min(need,h.qty);
     return {h,qty,need,short:need>h.qty,cash:qty*net,pnl:coPnl(h,qty,fee)};
   });
-  renderCashOut(picks,solo,{target,needCash,cashNow,cashD2,remain});
+  renderCashOut(picks,solo,{target,needCash,cashNow,cashD0,remain});
   msg.textContent="계좌별 수수료 자동 적용 · ETF는 거래세 면제";
 }
 function renderCashOut(picks,solo,ctx){
-  const {target,needCash,cashNow,cashD2,remain}=ctx;
+  const {target,needCash,cashNow,cashD0,remain}=ctx;
   const won=n=>Math.round(n||0).toLocaleString("ko-KR");
   const sign=v=>`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${won(v)}</span>`;
   const cash=picks.reduce((s,p)=>s+p.cash,0), pnl=picks.reduce((s,p)=>s+p.pnl,0);
@@ -2717,10 +2751,10 @@ function renderCashOut(picks,solo,ctx){
   </tr>`;
   const head=extra=>`<thead><tr><th class="l">계좌</th><th class="l">종목</th><th>팔 수량</th>
     <th>현재가</th><th>실수령액</th><th>실현손익</th><th>남는 수량</th>${extra?'<th class="l">비고</th>':""}</tr></thead>`;
-  // 예수금 총액과 출금가능액의 차이. 외화 등 원화로 바로 못 쓰는 몫이라 매도 계산에선 제외한다.
-  const locked=Math.max(0,cashD2-cashNow);
-  $("coWrap").innerHTML=`<div class="hint" style="margin-bottom:8px">목표 ${won(target)} · 보유 현금 ${won(cashNow)} 사용 → <b>매도로 만들 금액 ${won(needCash)}</b>`
-    +(locked?` <span style="color:#f5a623">(예수금 ${won(cashD2)} 중 ${won(locked)}은 외화 등으로 즉시 인출이 안 돼 계산에서 뺐습니다)</span>`:"")+`</div>`
+  // 오늘 예수금과 D+2 예수금의 차이는 아직 정산되지 않은 매매 대금이다(최근에 사면 줄고, 팔면 늘어난다)
+  const unsettled=cashNow-cashD0;
+  $("coWrap").innerHTML=`<div class="hint" style="margin-bottom:8px">목표 ${won(target)} · 보유 현금(D+2 정산 기준) ${won(cashNow)} 사용 → <b>매도로 만들 금액 ${won(needCash)}</b>`
+    +(Math.abs(unsettled)>=1?` <span style="color:var(--muted)">(오늘 예수금 ${won(cashD0)}과의 차이 ${unsettled>0?"+":""}${won(unsettled)}은 아직 정산되지 않은 매매 대금입니다)</span>`:"")+`</div>`
     +`<div class="exp-label">🎯 조합 매도 (${$("coOrder").selectedOptions[0].text})</div>`
     +`<table class="htbl">${head(0)}<tbody>${picks.map(row).join("")}</tbody>
       <tfoot><tr><td class="l" colspan="4">합계</td><td>${won(cash)}</td><td>${sign(pnl)}</td><td></td></tr></tfoot></table>`
@@ -2908,8 +2942,12 @@ async function loadTrades(ev){
 }
 
 /* --- 총괄 손익: 넣은 돈 대비 지금 얼마인가 --- */
-// 투입원금 = 매수합 - 매도합 + 예수금,  총손익 = 평가금액 - 매수합 + 매도합
-function renderPnl(buyAmt,sellAmt,byAcct){
+// 체결 1건의 수수료·거래세 추정. 체결금액(tot_ccld_amt)에는 비용이 빠져 있지만 예수금에는 이미 빠져나가 있으므로,
+// 원금을 역산할 때 더해 주지 않으면 원금이 비용만큼 작아지고 손익이 그만큼 부풀려진다. 수수료율·거래세는 보유종목 표와 같다
+const tradeCost=(amt,sell,account,name)=>amt*acctFee(account)+(sell&&!isEtfName(name)?amt*0.002:0);
+// 투입원금(역산) = 매수합 - 매도합 + 수수료·세금 + 예수금 - 배당,  총손익 = 총자산 - 투입원금
+function renderPnl(buyAmt,sellAmt,byAcct,costAmt){
+  costAmt=costAmt||0;
   const box=$("pnlSum"),note=$("pnlNote");
   const won=n=>Math.round(n||0).toLocaleString("ko-KR")+"원";
   if(!lastBal){box.innerHTML="";note.textContent="잔고를 못 불러와 총손익을 계산하지 못했어요.";return;}
@@ -2918,13 +2956,15 @@ function renderPnl(buyAmt,sellAmt,byAcct){
   const evalOf=s=>s.stockEval||(lastBal.holdings||[]).filter(h=>h.account===s.account).reduce((t,h)=>t+(h.evalAmt||0),0);
   const evalSum=sums.length?sums.reduce((t,s)=>t+evalOf(s),0)
     :(lastBal.holdings||[]).reduce((s,h)=>s+(h.evalAmt||0),0);
-  // 증권사 앱 표시 총자산은 예수금 총액 기준이다. 출금가능액을 쓰면 외화 등 원화 미환전분이 빠진다.
+  // 예수금은 D+2 정산 기준을 쓴다. 오늘 예수금(dnca_tot_amt)에는 아직 빠져나가지 않은 매수 대금이 남아 있어,
+  // 이미 평가금액에 들어간 주식과 합치면 그만큼 두 번 세게 된다.
   const cash=lastBal.cashD2||lastBal.cash||0;
   const cf=cfTotals();
   const cfDiv=cf.div; // 배당은 원금이 아니라 수익
   // 입금 기록이 있으면 순투입(입금-출금)을 쓴다.
   // 기록이 없으면 역산하는데, 역산의 cash는 이미 인출 후 잔액이라 출금을 또 빼면 이중 차감이 된다.
-  const invested=cf.inn>0?cf.net:(buyAmt-sellAmt+cash-cfDiv);
+  const backed=buyAmt-sellAmt+costAmt+cash-cfDiv; // 역산 원금
+  const invested=cf.inn>0?cf.net:backed;
   const asset=evalSum+cash;
   const pnl=asset-invested;
   // 수익률 분모는 투입 원금과 같은 기준(순투입 = 입금 - 출금)을 쓴다.
@@ -2942,37 +2982,37 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     <div class="exp-box"><div class="lbl">투입 원금${cf.inn>0?"":"(추정)"}</div><div class="num">${won(invested)}</div>
       <div class="lbl" style="margin:4px 0 0">${cf.inn>0
         ?`입금 ${won(cf.inn)}${cf.out?" − 출금 "+won(cf.out):""}`
-        :`순투입 ${won(buyAmt-sellAmt)} + 남은현금 ${won(cash)}${cfDiv?" − 배당 "+won(cfDiv):""}`}</div></div>
+        :`순투입 ${won(buyAmt-sellAmt)} + 수수료·세금(추정) ${won(costAmt)} + 남은현금 ${won(cash)}${cfDiv?" − 배당 "+won(cfDiv):""}`}</div></div>
     <div class="exp-box"><div class="lbl">현재 총자산</div><div class="num">${won(asset)}</div>
       <div class="lbl" style="margin:4px 0 0">주식 ${won(evalSum)} + 예수금 ${won(cash)}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총손익</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${won(pnl)}</div>
       <div class="lbl" style="margin:4px 0 0">평가 ${col(evalPnl)} · 실현 ${col(realized)}${cfDiv?" · 배당 "+col(cfDiv):""}</div></div>
     <div class="exp-box total" style="border-color:${c}"><div class="lbl">총수익률</div><div class="num" style="color:${c}">${pnl>=0?"+":""}${rate.toFixed(2)}%</div>
-      ${cfTotals().out?`<div class="lbl" style="margin:4px 0 0">누적 입금 ${won(rateBase)} 대비</div>`:""}</div>`;
+      ${cf.out?`<div class="lbl" style="margin:4px 0 0">순투입(입금 − 출금) ${won(rateBase)} 대비</div>`:""}</div>`;
   // 계좌가 통째로 누락되면 원금이 크게 틀어지므로 계좌별 내역을 항상 노출한다
   const tradeAccts=Object.keys(byAcct||{});
   const names=sums.map(s=>s.account).concat(tradeAccts.filter(k=>!sums.some(s=>s.account===k)));
   const lines=names.map(n=>{
-    const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
+    const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,cost:0,n:0};
     const ev=s?evalOf(s):0, ca=s?(s.cashD2||s.cash||0):0;
-    const inv=t.buy-t.sell+ca, ast=ev+ca, p=ast-inv, rt=inv>0?(p/inv*100):0;
+    const inv=t.buy-t.sell+(t.cost||0)+ca, ast=ev+ca, p=ast-inv, rt=inv>0?(p/inv*100):0;
     const pc=p>=0?"var(--accent2)":"var(--danger)";
     const warn=!s?' <span style="color:#f5a623">← 잔고 조회 실패</span>':(!t.n?' <span style="color:#f5a623">← 체결내역 0건</span>':"");
     return `<b>${esc(n)}</b> · 투입 ${won(inv)} → 자산 ${won(ast)} `
       +`<b style="color:${pc}">(손익 ${p>=0?"+":""}${won(p)} · ${p>=0?"+":""}${rt.toFixed(2)}%)</b>${warn}`;
   }).join("<br>");
   // 누계를 그냥 나열하면 손익과 무관한 숫자로 오해된다. 어떻게 원금이 나왔는지 검산식으로 보인다.
-  const proof=(n,buy,sell,ca,ev,cnt,na)=>{
-    const net=buy-sell, ast=na||(ev+ca), gap=ast-(ev+ca);
+  const proof=(n,buy,sell,ca,ev,cnt,na,cost)=>{
+    const net=buy-sell+(cost||0), ast=na||(ev+ca), gap=ast-(ev+ca);
     return `<b>${esc(n)}</b>${cnt!=null?` <span style="color:var(--muted)">체결 ${cnt}건</span>`:""}`
-      +`<br><span style="padding-left:10px">순투입 ${won(net)} = 매수 ${won(buy)} − 매도 ${won(sell)}</span>`
+      +`<br><span style="padding-left:10px">순투입 ${won(net)} = 매수 ${won(buy)} − 매도 ${won(sell)} + 수수료·세금(추정) ${won(cost||0)}</span>`
       +`<br><span style="padding-left:10px">투입원금 ${won(net+ca)} = 순투입 + 현금 ${won(ca)}</span>`
       +`<br><span style="padding-left:10px">총자산 ${won(ast)} = ${na?`증권사 순자산 (주식 ${won(ev)} + 현금 ${won(ca)}보다 ${won(gap)} 많음: 미수·정산 대기분)`:`주식 ${won(ev)} + 현금 ${won(ca)}`}</span>`
       +`<br><span style="padding-left:10px">손익 ${won(ast-net-ca)} = 총자산 − 투입원금</span>`;
   };
   const detail=names.map(n=>{
-    const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,n:0};
-    return proof(n,t.buy,t.sell,s?(s.cashD2||s.cash||0):0,s?evalOf(s):0,t.n,0);
+    const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,cost:0,n:0};
+    return proof(n,t.buy,t.sell,s?(s.cashD2||s.cash||0):0,s?evalOf(s):0,t.n,0,t.cost);
   }).join("<br>");
   // 증권사 앱 표시값과 어느 항목이 맞는지 바로 대조할 수 있게 총자산 후보를 나란히 보인다
   const cand=[
@@ -2992,8 +3032,8 @@ function renderPnl(buyAmt,sellAmt,byAcct){
     +"배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요."
     +(cash?"":' <span style="color:#f5a623">예수금이 0이라 원금이 실제보다 적게 나옵니다.</span>')
     +`<details style="margin-top:6px"><summary style="cursor:pointer">계산 근거 보기</summary>`
-    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,0)}`
-    +(cf.inn>0?`<br><span style="padding-left:10px">입금 기록 기준 원금 ${won(cf.net)} (역산값 ${won(buyAmt-sellAmt+cash-cfDiv)}과 ${won(Math.abs(cf.net-(buyAmt-sellAmt+cash-cfDiv)))} 차이)</span>`:"")
+    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,0,costAmt)}`
+    +(cf.inn>0?`<br><span style="padding-left:10px">입금 기록 기준 원금 ${won(cf.net)} (역산값 ${won(backed)}과 ${won(Math.abs(cf.net-backed))} 차이)</span>`:"")
     +`<br><br><b>총자산 후보값 (증권사 앱 표시값과 대조하세요)</b><br>${cand}${raw2}</div></details>`;
 }
 function renderTrades(list){
@@ -3020,14 +3060,15 @@ function renderTrades(list){
     };
   }).filter(t=>t.qty>0); // 수량 0 = 미체결
   // 총손익 요약은 화면 필터와 무관하게 항상 기간 전체 기준으로 계산한다
-  let allBuy=0,allSell=0;
+  let allBuy=0,allSell=0,allCost=0;
   const byAcct={};
   rows.forEach(t=>{
     if(!t.side)return;
-    const x=byAcct[t.account]||(byAcct[t.account]={buy:0,sell:0,n:0});
-    x.n++; t.sell?(x.sell+=t.amt,allSell+=t.amt):(x.buy+=t.amt,allBuy+=t.amt);
+    const x=byAcct[t.account]||(byAcct[t.account]={buy:0,sell:0,cost:0,n:0});
+    const c=tradeCost(t.amt,t.sell,t.account,t.name);
+    x.n++; x.cost+=c; allCost+=c; t.sell?(x.sell+=t.amt,allSell+=t.amt):(x.buy+=t.amt,allBuy+=t.amt);
   });
-  renderPnl(allBuy,allSell,byAcct);
+  renderPnl(allBuy,allSell,byAcct,allCost);
   if(!rows.length){wrap.innerHTML='<div class="hint">해당 기간에 체결 내역이 없어요.</div>';return;}
   if(filter==="buy")rows=rows.filter(t=>t.side&&!t.sell);
   else if(filter==="sell")rows=rows.filter(t=>t.sell);
@@ -3074,25 +3115,30 @@ function cfTotals(){
   cashFlows.forEach(f=>{f.type==="in"?inn+=f.amt:f.type==="out"?out+=f.amt:div+=f.amt;});
   return {inn,out,div,net:inn-out};
 }
+// 수정 중인 기록(객체 참조). 목록은 날짜순으로 다시 정렬되므로 순번이 아니라 객체로 잡는다
+let cfEdit=null;
+function setCfEdit(f){cfEdit=f;$("cfAddBtn").textContent=f?"저장":"추가";$("cfCancelBtn").style.display=f?"":"none";}
 function addCashFlow(){
   const date=$("cfDate").value, amt=parseFloat($("cfAmt").value)||0;
   if(!date||amt<=0)return;
-  cashFlows.push({date,type:$("cfType").value,amt,memo:$("cfMemo").value.trim()});
-  $("cfAmt").value="";$("cfMemo").value="";
+  const rec={date,type:$("cfType").value,amt,memo:$("cfMemo").value.trim()};
+  if(cfEdit&&cashFlows.includes(cfEdit))Object.assign(cfEdit,rec); else cashFlows.push(rec);
+  setCfEdit(null); $("cfAmt").value="";$("cfMemo").value="";
   saveCashFlows();renderCashFlows();
 }
-function delCashFlow(i){cashFlows.splice(i,1);saveCashFlows();renderCashFlows();}
-// 월 지출 카드와 같은 방식: 입력창으로 되돌린 뒤 목록에서 빼고, 다시 추가하면 반영된다
+function delCashFlow(i){if(cashFlows[i]===cfEdit)cancelCfEdit();cashFlows.splice(i,1);saveCashFlows();renderCashFlows();}
+// 수정: 기록은 목록에 그대로 두고 입력칸으로 불러온다. "저장"을 눌러야 바뀐다
 function editCashFlow(i){
   const f=cashFlows[i];
   $("cfDate").value=f.date;$("cfType").value=f.type;
   $("cfAmt").value=f.amt;$("cfMemo").value=f.memo||"";
-  cashFlows.splice(i,1);saveCashFlows();renderCashFlows();
+  setCfEdit(f); renderCashFlows(); $("cfAmt").focus();
 }
+function cancelCfEdit(){setCfEdit(null);$("cfAmt").value="";$("cfMemo").value="";renderCashFlows();}
 function renderCashFlows(){
   cashFlows.sort((a,b)=>b.date.localeCompare(a.date)); // 최신이 위. 계산 함수들은 전부 누적이라 순서에 영향받지 않는다
   $("cfList").innerHTML=cashFlows.map((f,i)=>`
-    <li class="sched-item">
+    <li class="sched-item ${f===cfEdit?'editing':''}">
       <span class="time">${f.date.slice(2)}</span>
       <span class="cat-tag">${CF_LABEL[f.type]||"기타"}</span>
       <span class="txt">${esc(f.memo||"")}</span>
@@ -3112,14 +3158,6 @@ function investedAt(ymd8,fallback){
   let net=0;
   cashFlows.forEach(f=>{if(f.type!=="div"&&f.date<=k)net+=(f.type==="out"?-f.amt:f.amt);});
   return net;
-}
-// 수익률 분모는 누적 입금액(출금을 빼지 않음). 인출해도 성과가 나빠 보이지 않게 한다.
-function depositedAt(ymd8,fallback){
-  if(!cashFlows.length)return fallback;
-  const k=ymd8.slice(0,4)+"-"+ymd8.slice(4,6)+"-"+ymd8.slice(6,8);
-  let v=0;
-  cashFlows.forEach(f=>{if(f.type==="in"&&f.date<=k)v+=f.amt;});
-  return v||fallback;
 }
 
 /* ===== 자산 추이 (과거 재구성 + 오늘 스냅샷) ===== */
@@ -3368,8 +3406,9 @@ function tradeEvents(){
     const cd=pickTr(o,TR_F.sideCode),nm=pickTr(o,TR_F.sideName);
     const side=nm?String(nm):(cd==="01"?"매도":cd==="02"?"매수":"");
     if(!side)return;
+    const amt=rawAmt>0?rawAmt:qty*price, sell=side.includes("매도");
     out.push({date:String(pickTr(o,TR_F.date)||""),code:String(pickTr(o,TR_F.code)||""),
-      sell:side.includes("매도"),qty,amt:rawAmt>0?rawAmt:qty*price});
+      sell,qty,amt,cost:tradeCost(amt,sell,o.account,pickTr(o,TR_F.name))});
   });
   return out.sort((a,b)=>a.date.localeCompare(b.date));
 }
@@ -3414,15 +3453,16 @@ async function loadEquity(){
     };
     const buyAll=evs.filter(e=>!e.sell).reduce((s,e)=>s+e.amt,0);
     const sellAll=evs.filter(e=>e.sell).reduce((s,e)=>s+e.amt,0);
-    const invested=buyAll-sellAll+cash0-cfTotals().div; // 배당은 원금이 아니므로 제외
+    const costAll=evs.reduce((s,e)=>s+e.cost,0); // 수수료·세금 추정(손익 요약과 같은 기준)
+    const invested=buyAll-sellAll+costAll+cash0-cfTotals().div; // 배당은 원금이 아니므로 제외
     const hold={},lastPx={},holdSnap=[];
-    let ei=0,restBuy=buyAll,restSell=sellAll; // 해당 날짜 '이후'에 남은 매수·매도액
+    let ei=0,restBuy=buyAll,restSell=sellAll,restCost=costAll; // 해당 날짜 '이후'에 남은 매수·매도액·비용
     const assets=days.map(d=>{
       while(ei<evs.length&&evs[ei].date<=d){
         const e=evs[ei];
         hold[e.code]=(hold[e.code]||0)+(e.sell?-e.qty:e.qty);
         if(e.qty)lastPx[e.code]=e.amt/e.qty; // 일봉이 비는 종목은 체결 단가로 평가한다
-        e.sell?restSell-=e.amt:restBuy-=e.amt;
+        e.sell?restSell-=e.amt:restBuy-=e.amt; restCost-=e.cost;
         ei++;
       }
       let stock=0;
@@ -3435,7 +3475,8 @@ async function loadEquity(){
       const snapH={};
       Object.keys(hold).forEach(c=>{if(hold[c]>0)snapH[c]=hold[c];});
       holdSnap.push(snapH);
-      return stock+cash0+restBuy-restSell-cfAfter(d);
+      // 그날 현금 = 지금 현금 + 이후 매수(와 비용)로 나갈 돈 − 이후 매도로 들어올 돈 − 이후 입금
+      return stock+cash0+restBuy-restSell+restCost-cfAfter(d);
     });
     // 실제로 확인했던 날은 스냅샷 값이 정확하므로 우선한다
     const snap=JSON.parse(localStorage.getItem("equitySnap")||"{}");
@@ -3445,13 +3486,14 @@ async function loadEquity(){
     if(assets.length)assets[assets.length-1]=nowEval+cash0;
     // 입출금 기록이 있으면 원금선을 날짜별 계단으로, 없으면 기존처럼 일정하게 그린다
     const investLine=days.map(d=>investedAt(d,invested));
-    const rateLine=days.map(d=>depositedAt(d,invested)); // 수익률 분모(누적 입금)
+    // 수익률 분모는 그날의 순투입(원금선)이다. 손익 요약의 총수익률과 같은 기준이어야 두 화면 숫자가 맞는다
+    const rateLine=investLine;
     $("eqDetail").style.display="none"; // 다시 불러오면 이전 선택은 무효
     eqCtx=null; // 차트와 컨텍스트가 어긋난 채로 클릭되는 것을 막는다
     drawEquity(days.map(d=>d.slice(4,6)+"/"+d.slice(6,8)),assets,investLine,
       days.map(d=>d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8)),rateLine,idxLine,kqLine,fxLine,jpyLine);
     const cur=assets[assets.length-1],base=investLine[investLine.length-1],p=cur-base;
-    const rBase=rateLine[rateLine.length-1]||base; // 수익률 분모는 누적 입금액
+    const rBase=rateLine[rateLine.length-1]||base; // 수익률 분모 = 순투입(손익 요약과 같은 기준)
     // 시작일 자산은 그 시점 원금과 거의 같아야 정상. 벌어지면 시세 공백·기록 누락을 의심한다.
     const noPx=codes.filter(c=>!px[c]||!Object.keys(px[c]).length);
     // 보유종목에 없으면 체결내역에서 이름을 찾는다. 코드만 보이면 정체를 알 수 없다.
@@ -3665,10 +3707,15 @@ function marketEvents(fromYmd,months){
         ?"선물과 옵션이 같은 날 끝나 청산 물량이 몰립니다. 지수가 장 막판에 크게 흔들리는 날로 알려져 있습니다."
         :"옵션만 만기입니다. 동시만기보다는 영향이 작은 편입니다."
     });
-    // 보고서 법정 제출기한. 1·2·3분기는 분기·반기보고서(분기말 +45일),
-    // 4분기는 분기보고서를 내지 않고 사업연도 종료 후 90일 이내 사업보고서를 낸다.
+  }
+  // 보고서 법정 제출기한. 1·2·3분기는 분기·반기보고서(분기말 +45일),
+  // 4분기는 분기보고서를 내지 않고 사업연도 종료 후 90일 이내 사업보고서를 낸다.
+  // 기한은 분기가 끝난 뒤에 오므로, 이미 지난 분기말(최대 3개월 전)부터 살펴야 다가오는 기한이 빠지지 않는다
+  for(let i=-3;i<months;i++){
+    const y=base.getFullYear(), m=base.getMonth()+i;
+    const q=new Date(y,m+1,0); // 그 달 말일
+    const mm=q.getMonth()+1;
     if([3,6,9,12].includes(mm)){
-      const q=new Date(y,m+1,0); // 분기말
       const annual=mm===12;
       const due=new Date(q); due.setDate(due.getDate()+(annual?90:45));
       out.push({

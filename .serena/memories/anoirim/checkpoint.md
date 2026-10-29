@@ -1,4 +1,4 @@
-task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림·월 지출 목록 표시 + 근무 일정 통합 (2026-10-13, PR #1~#31 main 머지 완료)
+task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림·월 지출 목록 표시 + 근무 일정 통합 (2026-10-29, PR #1~#32 main 머지 완료, 로컬 커밋 4건 반영, #34 대기)
 files:
   - index.html: 완료
     - 하원 일정·스케줄러 시간 입력칸 120→150px (#pkTime, #schedTime)
@@ -30,6 +30,9 @@ files:
     - 근무 일정 카드 제거 (PR #31): renderWork·wkCur·wkMove 등 화면 블록 삭제, applyWorkEdit는 데이터 블록으로(renderEye만).
       범례·오늘 근무는 workLegendHtml → eyeWorkLegend
     - 월 지출 목록 날짜 표시 (PR #26): 이번 달일 때 오늘 줄 강조(exp-today), 지난 날 줄 흐리게(exp-past), expDayCls. applyNewDay에서 renderExpAll
+    - 로컬 작업으로 main에 들어온 것: 보유종목 가격 칸 3단(매입가(본전가)), 안약 연쇄 타이머, 식품 재고 동기화(api/sync.js), PWA(manifest·sw·icon)
+    - 전체 점검 후 수정 (PR #34 예정): 시장 일정 제출기한 누락, 총수익률 분모 통일(순투입), 역산 원금에 수수료·세금 추정(tradeCost),
+      주식분석 보유 줄 계좌 합산, 목표 현금 D+2 예수금, 열어본 달 자동 저장 안 함, 수정 버튼이 항목을 지우던 문제(expEdit/cfEdit)
   - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준 (줄 번호 대신 함수명·블록 주석, index.html 약 3,700줄, PR #27)
 progress: 완료 (모두 main 반영·Vercel 배포)
 next_step: 실제 구글 계정으로 캘린더 연동 확인(클라이언트 ID 발급 후), 실제 계좌·지출 데이터로 배포본 확인

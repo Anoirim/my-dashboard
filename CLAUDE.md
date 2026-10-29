@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 개인용 웹 대시보드. 빌드 시스템·패키지 매니저·테스트 프레임워크가 **없다**. `package.json`, `vercel.json` 모두 없으며 Vercel의 zero-config가 `api/` 디렉터리를 서버리스 함수로 자동 인식한다.
 
-- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,600줄). Chart.js만 CDN(cdnjs) 로드
+- `index.html` — HTML/CSS/JS 전부를 담은 단일 파일 (약 3,800줄). Chart.js만 CDN(cdnjs) 로드
 - `api/kis.js` — KIS(한국투자증권) OpenAPI 프록시 + 한국은행 ECOS·Google 뉴스 RSS 중계. CommonJS 핸들러 1개 (약 600줄)
 - `api/sync.js` — 기기 사이 데이터 저장소(Upstash KV). 지금은 식품 재고만 쓴다 (`### 식품 재고 동기화`)
 - `manifest.json` · `sw.js` · `icon.svg` — 홈 화면에 추가(PWA)용. 서비스 워커는 **캐시를 두지 않는다**(`sw.js` 주석). 배포한 새 코드가 바로 보여야 하기 때문이다. `icon.svg`는 XML이라 주석 안에 `--`를 쓰면 파싱이 깨진다
@@ -97,6 +97,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 화면 순서는 카드값 → 정기지출 → 카드외 비정기 → 하단 요약 3박스 → 보유금액 → 월별 지출 추이다.
 
 - **이월** — 없는 달을 열면 직전 달에서 카드·정기지출을 이월하고 청구액은 0으로 둔다(`loadMonth`). 카드외 비정기(`oneoff`)와 보유금액(`cash`·`cashHand`)은 이월하지 않는다
+  - 열어보기만 한 달은 **저장하지 않는다**(메모리에만 이월). 저장하면 정기지출 추정치가 월별 지출 추이에 실제 지출처럼 잡힌다. 그 달에서 항목을 바꾸거나 보유금액을 넣는 순간 `saveExpData`가 만든다
+- **수정** — 수정 버튼은 항목을 목록에 둔 채 입력칸으로 불러오고(`expEdit[kind]`에 객체 참조, 줄에 점선 `editing`), "저장"을 눌러야 바뀐다. "취소"는 `endExpEdit`. 카드 이름을 바꾸면 그 카드로 내던 정기지출 결제수단도 따라 바꾼다. 달을 옮기면 수정 상태를 푼다. 입출금 기록도 같은 방식(`cfEdit`)
 - **카드별 분해(`cardSplit`)** — 실제 청구액을 정기지출(예상)보다 우선한다
   - 청구액 입력: 반영액 = 청구액. 카드정기는 청구액을 넘지 않게 자르고(`fx`), 넘는 몫(`cut`)은 합계에 넣지 않는다
   - 청구액 0원(미입력): 그 카드 정기지출로 추정한다(`est`)
@@ -186,6 +188,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **본전가·목표가 공식** — `avg*(1+fee)/(1-fee-tax)` 형태가 `calcSwitch()`(손절 후 재매수), `renderHoldings()`(보유종목), `htTargetPrice()`·`holdGainHtml()`(목표 입력·예상이익), `addBuyHtml()`(추가 매수)에 각각 있다
 - **월 총지출 공식** — 카드 반영액(체크분, `cardSums`) + 카드 외 정기지출 + 카드외 비정기. `renderExpAll()`(화면 합계)과 `monthTotals()`(추이 그래프)에 따로 있다. 카드 부분은 둘 다 `cardSums()`를 공유한다
+- **수수료·세금 추정(`tradeCost`)** — 체결금액에는 비용이 빠져 있어 원금 역산에 더한다. 손익 요약(`renderPnl`, `renderTrades` 집계)과 자산 추이(`loadEquity`의 원금·과거 현금)가 같은 함수를 쓴다. 수수료율은 `acctFee`, 거래세 0.2%(ETF 면제)
+- **예수금 기준** — 총자산·목표 현금·추가 매수·자산 추이 모두 D+2 정산 예수금(`cashD2||cash`)을 쓴다. 오늘 예수금(`dnca_tot_amt`)에는 아직 안 빠진 매수 대금이 남아 있다
+- **총수익률 분모** — 손익 요약과 자산 추이 모두 순투입(입금 − 출금, 기록 없으면 역산 원금)
 - **ETF 판별** — 프록시는 `per===0 && pbr===0`으로(`getFull`), 프론트는 종목명 키워드 배열 `ETF_KW`로(`isEtfName`) 판정한다
 
 ## 관련 문서
