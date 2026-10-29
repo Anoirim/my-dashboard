@@ -1,10 +1,9 @@
 // KIS(한국투자증권) OpenAPI 프록시 - Vercel 서버리스 함수
-// 환경변수: KIS_APPKEY, KIS_APPSECRET  (모의투자면 KIS_ENV=mock 추가)
-// 호출:
-//   /api/kis?symbol=005930                 → 현재가/지표
-//   /api/kis?action=daily&symbol=005930    → 최근 일봉(과거 시세)
-//   /api/kis?action=finance&symbol=005930  → 재무비율(ROE·부채비율 등)
-//   /api/kis?action=trades&from=YYYYMMDD&to=YYYYMMDD → 기간 내 체결내역
+// 환경변수: KIS_APPKEY, KIS_APPSECRET  (모의투자면 KIS_ENV=mock 추가), 계좌별 KIS_ACCT{1..4}_*, ECOS_KEY, DASH_TOKEN
+// 호출(?action=):
+//   price(기본, symbol) 현재가+이름+일봉+재무/ETF · quote(symbol) 경량 현재가 · daily(symbol) 일봉 · finance(symbol) 재무비율
+//   balance 잔고 · trades(from,to) 체결내역 · realized(from,to) 일별 실현손익 · index(code) 지수 일봉
+//   macro(stat,item | kind=list/items) 한국은행 ECOS · news(q) 구글 뉴스 RSS
 
 const IS_MOCK = /^(mock|vts|모의)$/i.test(process.env.KIS_ENV || "");
 const BASE = IS_MOCK
@@ -39,7 +38,13 @@ async function getTokenFor(appkey, appsecret) {
   if (c && Date.now() < c.exp) return c.token;
   const kvKey = "kis_token_" + appkey.slice(0, 16);
   const saved = await kvGet(kvKey);
-  if (saved) { tokenCaches[appkey] = { token: saved, exp: Date.now() + 60 * 60 * 1000 }; return saved; }
+  if (saved) {
+    // 만료 시각을 함께 저장한다. 예전 형식(토큰 문자열만)은 남은 수명을 모르니 5분만 메모리에 둔다
+    // (예전에는 무조건 1시간을 둬서, 만료 직전에 읽으면 만료된 토큰을 최대 55분 동안 썼다)
+    let tok = saved, exp = Date.now() + 5 * 60 * 1000;
+    try { const o = JSON.parse(saved); if (o && o.token) { tok = o.token; exp = o.exp; } } catch (e) {}
+    if (Date.now() < exp) { tokenCaches[appkey] = { token: tok, exp }; return tok; }
+  }
   const r = await fetch(BASE + "/oauth2/tokenP", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -48,8 +53,9 @@ async function getTokenFor(appkey, appsecret) {
   const j = await r.json();
   if (!j.access_token) throw new Error(j.error_description || j.msg1 || "토큰 발급 실패");
   const lifeSec = j.expires_in ? j.expires_in : 23 * 3600;
-  tokenCaches[appkey] = { token: j.access_token, exp: Date.now() + (lifeSec - 60) * 1000 };
-  await kvSet(kvKey, j.access_token, lifeSec - 300);
+  const exp = Date.now() + (lifeSec - 60) * 1000;
+  tokenCaches[appkey] = { token: j.access_token, exp };
+  await kvSet(kvKey, JSON.stringify({ token: j.access_token, exp }), lifeSec - 300);
   return j.access_token;
 }
 // 시세용(계좌 무관): 기본 키 사용
@@ -69,9 +75,11 @@ function headers(token, tr_id, key, secret) {
 }
 
 const num = (v) => (v === undefined || v === null || v === "" ? null : Number(v));
-const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, "");
-const today = () => ymd(new Date());
-const monthsAgo = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n); return ymd(d); };
+const ymd = (d) => d.toISOString().slice(0, 10).replace(/-/g, ""); // UTC 필드 기준(splitPeriods의 UTC 날짜와 짝)
+// 서버(Vercel)는 UTC라 그냥 new Date()로 자르면 한국 자정~오전 9시에는 어제 날짜가 된다. 한국 시간으로 옮겨 자른다
+const kstNow = () => new Date(Date.now() + 9 * 3600 * 1000);
+const today = () => ymd(kstNow());
+const monthsAgo = (n) => { const d = kstNow(); d.setUTCMonth(d.getUTCMonth() - n); return ymd(d); };
 const dt = (v, def) => (/^\d{8}$/.test(v) ? v : def); // YYYYMMDD 아니면 기본값
 const pick = (o, keys) => { for (const k of keys) if (o[k] !== undefined && o[k] !== "") return o[k]; return null; };
 
@@ -305,7 +313,6 @@ async function getBalance() {
   const holdings = [];
   const errors = [];
   const summary = [];
-  let raw2 = null;
   for (let i = 0; i < accts.length; i++) {
     const a = accts[i];
     if (i > 0) await sleep(600); // 계좌 간 간격(초당 제한 회피)
@@ -325,7 +332,6 @@ async function getBalance() {
       });
       // 예수금·순자산은 output2에 있다(계좌 요약). 총손익 계산에 필요해 함께 반환한다.
       const o2 = Array.isArray(j.output2) ? (j.output2[0] || {}) : (j.output2 || {});
-      if (!raw2) raw2 = o2; // 필드명 확인용 원본 1건 보존
       summary.push({
         account: a.label,
         cash: num(o2.dnca_tot_amt),          // 예수금총금액
@@ -340,7 +346,7 @@ async function getBalance() {
   }
   const sum = (k) => summary.reduce((s, x) => s + (x[k] || 0), 0);
   return {
-    holdings, summary, raw2,
+    holdings, summary,
     cash: sum("cash"), netAsset: sum("netAsset"), stockEval: sum("stockEval"),
     cashD2: sum("cashD2"), totalEval: sum("totalEval"),
     purchase: sum("purchase"), evalPnl: sum("evalPnl"),
@@ -351,8 +357,8 @@ async function getBalance() {
 // --- 주문체결내역 조회 (계좌별 각자의 API 키 사용) ---
 // 조회 시작일이 3개월 이전이면 별도 TR을 쓴다. 3개월 경계를 걸치는 기간은 단일 TR로 완전히 커버되지 않을 수 있다.
 function tradeTrId(fromYmd) {
-  const limit = new Date();
-  limit.setMonth(limit.getMonth() - 3);
+  const limit = kstNow();
+  limit.setUTCMonth(limit.getUTCMonth() - 3);
   const isOld = String(fromYmd) < ymd(limit);
   if (IS_MOCK) return isOld ? "VTSC9215R" : "VTTC0081R";
   return isOld ? "CTSC9215R" : "TTTC0081R";
@@ -576,22 +582,7 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "6자리 종목코드를 입력하세요 (예: 005930)" });
 
     let out;
-    if (action === "debug") {
-      // 진단: KIS 원본 응답에서 종목명 후보 필드 확인
-      const token = await getToken();
-      const pUrl = BASE + "/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol;
-      const pj = await (await fetch(pUrl, { headers: headers(token, "FHKST01010100") })).json();
-      const dUrl = BASE + "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol + "&FID_INPUT_DATE_1=" + monthsAgo(1) + "&FID_INPUT_DATE_2=" + today() + "&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0";
-      const dj = await (await fetch(dUrl, { headers: headers(token, "FHKST03010100") })).json();
-      out = {
-        price_rt_cd: pj.rt_cd, price_msg: pj.msg1,
-        price_output_keys: Object.keys(pj.output || {}),
-        price_name_candidates: { hts_kor_isnm: (pj.output||{}).hts_kor_isnm, rprs_mrkt_kor_name: (pj.output||{}).rprs_mrkt_kor_name },
-        daily_rt_cd: dj.rt_cd, daily_msg: dj.msg1,
-        daily_output1: dj.output1 || null,
-      };
-    }
-    else if (action === "daily") out = await getDaily(symbol, String(req.query.from || ""), String(req.query.to || ""));
+    if (action === "daily") out = await getDaily(symbol, String(req.query.from || ""), String(req.query.to || ""));
     else if (action === "finance") out = await getFinance(symbol);
     else if (action === "quote") out = await getPrice(symbol);   // 실시간용(가벼움)
     else out = await getFull(symbol);                            // 기본: 전체(현재가+이름+차트+재무)
