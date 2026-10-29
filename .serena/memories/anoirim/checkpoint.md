@@ -1,4 +1,4 @@
-task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림·월 지출 목록 표시 + 근무 일정 통합 + 전체 점검 수정 (2026-10-29, PR #1~#36 main 머지 완료, #33은 중복으로 닫음, #37 대기)
+task: my-dashboard 보유종목 표 재구성·추가 매수 시뮬레이션 + 스케줄러↔안약 달력 + 월 지출 개편 + 결제일 알림·월 지출 목록 표시 + 근무 일정 통합 + 전체 점검 수정 (2026-10-29, PR #1~#37 main 머지 완료, #33은 중복으로 닫음)
 files:
   - index.html: 완료
     - 하원 일정·스케줄러 시간 입력칸 120→150px (#pkTime, #schedTime)
@@ -33,7 +33,7 @@ files:
     - 로컬 작업으로 main에 들어온 것: 보유종목 가격 칸 3단(매입가(본전가)), 안약 연쇄 타이머, 식품 재고 동기화(api/sync.js), PWA(manifest·sw·icon)
     - 전체 점검 후 수정 (PR #34): 시장 일정 제출기한 누락, 총수익률 분모 통일(순투입), 역산 원금에 수수료·세금 추정(tradeCost),
       주식분석 보유 줄 계좌 합산, 목표 현금 D+2 예수금, 열어본 달 자동 저장 안 함, 수정 버튼이 항목을 지우던 문제(expEdit/cfEdit)
-    - 점검에서 남긴 것 마저 수정 (PR #37 예정): 장중 판정에 공휴일·12/31 연말 휴장 반영(marketState), 자정~09시 UTC 날짜(curMonth 기본값·kis.js kstNow),
+    - 점검에서 남긴 것 마저 수정 (PR #37): 장중 판정에 공휴일·12/31 연말 휴장 반영(marketState), 자정~09시 UTC 날짜(curMonth 기본값·kis.js kstNow),
       실현손익 공식을 매수 수수료 포함으로 통일(coPnl·calcSwitch), KV 토큰에 만료 시각 저장(getTokenFor),
       안 쓰는 코드 삭제(loadHoldings·toggleSched·delSched·acctFee ISA 분기·정기지출 dnd·apiKey 중복 리스너·총자산 후보값/잔고 원본/거래 원본 보기·debug action·raw2)
   - CLAUDE.md, 대시보드-프로젝트-정리.md: 현재 코드 기준 (줄 번호 대신 함수명·블록 주석, index.html 약 3,800줄, PR #35)
