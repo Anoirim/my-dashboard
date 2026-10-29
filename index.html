@@ -1195,9 +1195,6 @@ async function itemDel(src,key){
   try{await gcalFetch("DELETE","/"+encodeURIComponent(e.id),null,e.cal);}catch(err){}
   gcalRefresh(true);
 }
-// 예전 이름 호환(다른 곳에서 부르는 로컬 일정 함수)
-function toggleSched(i){itemToggle("l",i);}
-function delSched(i){itemDel("l",i);}
 $("schedText").addEventListener("keydown",e=>{if(e.key==="Enter")addSched();});
 $("schedDate").value=new Date().toLocaleDateString("sv-SE");
 $("gcalClientId").value=localStorage.getItem("gcalClientId")||"";
@@ -1689,7 +1686,7 @@ renderEye();
 const wonKR=n=>Math.round(n).toLocaleString("ko-KR")+"원";
 const esc=s=>s.replace(/</g,"&lt;");
 let expData=JSON.parse(localStorage.getItem("expData")||"{}");
-let curMonth=localStorage.getItem("curMonth")||new Date().toISOString().slice(0,7); // YYYY-MM
+let curMonth=localStorage.getItem("curMonth")||new Date().toLocaleDateString("sv-SE").slice(0,7); // YYYY-MM (UTC로 자르면 1일 오전 9시 전엔 전달이 된다)
 let cards=[], fixed=[], oneoff=[]; // oneoff: 카드외 비정기 [{day,name,amt,inc}]
 // 수정 중인 항목(객체 참조). 수정을 누르면 항목은 목록에 그대로 두고 입력칸으로 불러오며, "저장"을 눌러야 바뀐다.
 // 예전에는 누르는 순간 목록에서 지우고 저장해서, 저장하지 않고 떠나면 항목이 사라졌다.
@@ -1855,7 +1852,7 @@ function dndEnd(){document.querySelectorAll(".drag-over").forEach(x=>x.classList
 function dndDrop(type,to,el){
   if(el)el.classList.remove("drag-over");
   if(dndType!==type||dndFrom===null||dndFrom===to){dndEnd();return;}
-  const arr=type==="card"?cards:fixed;
+  const arr=cards; // 정기지출·카드외 비정기는 날짜순 고정이라 드래그는 카드 목록만 쓴다
   const [moved]=arr.splice(dndFrom,1);
   arr.splice(to,0,moved);
   saveExpData();renderExpAll();
@@ -2113,7 +2110,7 @@ function calcSwitch(){
   const isEtf=(i!==""&&lastHoldings[i])?isEtfName(lastHoldings[i].name):false;
   const tax=isEtf?0:0.002;
   const C=sell*qty*(1-fee-tax);                    // 매도 실수령(재매수에 쓸 현금)
-  const realized=(sell*(1-fee-tax)-avg)*qty;       // 확정 손익
+  const realized=(sell*(1-fee-tax)-avg*(1+fee))*qty; // 확정 손익(처음 살 때의 매수 수수료 포함, 예상이익과 같은 기준)
   const newQty=Math.floor(C/(buy*(1+fee)));        // 국내 정수 주
   const usedCash=newQty*buy*(1+fee), leftCash=C-usedCash;
   const dQty=newQty-qty;
@@ -2385,29 +2382,10 @@ function drawSimple(sym,q){
 /* ===== 내 보유 종목 (두 계좌 통합) ===== */
 const ETF_KW=["KODEX","TIGER","RISE","ACE","SOL","PLUS","KBSTAR","ARIRANG","HANARO","KOSEF","TIMEFOLIO","ETF","ETN"];
 function isEtfName(n){return n&&ETF_KW.some(k=>n.toUpperCase().includes(k));}
-let holdingsBusy=false;
-async function loadHoldings(ev){
-  if(holdingsBusy)return;
-  holdingsBusy=true;
-  const btn=ev&&ev.target?ev.target:null; if(btn){btn.disabled=true;btn.style.opacity=.5;}
-  const msg=$("hMsg");msg.textContent="불러오는 중...";
-  try{
-    const r=await kisFetch("?action=balance");
-    if(r.error){msg.textContent="오류: "+r.error;return;}
-    const hs=r.holdings||[];
-    // 보유종목 조회와 잔고 조회가 같은 응답이라, 예수금까지 여기서 확보해 둔다
-    lastHoldings=hs; lastBal=r;
-    showHoldings(hs);
-    msg.textContent="갱신: "+new Date().toLocaleTimeString("ko-KR")+(r.errors?(" · 일부 계좌 오류: "+r.errors.join(" / ")):"");
-  }catch(e){msg.textContent="연결 실패. 계좌 환경변수(KIS_ACCT1_NO 등)와 배포를 확인하세요.";}
-  finally{holdingsBusy=false; if(btn){btn.disabled=false;btn.style.opacity=1;}}
-}
-// 계좌별 편도 수수료율. 수동 입력 대신 계좌명으로 자동 적용(우대 0.0016% / ISA 0.015% / 그 외 기본).
+// 잔고·보유종목은 내 계좌 현황의 불러오기(loadTrades)와 1분 자동 갱신(refreshToday)이 함께 받는다
+// 계좌별 편도 수수료율. 수동 입력 대신 계좌명으로 자동 적용(우대 0.0016% / 그 외 0.015%).
 function acctFee(account){
-  const a=account||"";
-  if(a.includes("우대"))return 0.0016/100;
-  if(a.includes("ISA"))return 0.015/100;
-  return 0.015/100;
+  return (account||"").includes("우대")?0.0016/100:0.015/100;
 }
 let holdTargets=JSON.parse(localStorage.getItem("holdTargets")||"{}");
 // 저장 형식: {v:목표값, unit:"price"|"pct", qty:판매수량}. 구버전(숫자)은 가격으로 마이그레이션.
@@ -2690,7 +2668,8 @@ function analyzeHolding(code){
 }
 // 매도 실수령 = 수량 × 현재가 × (1 − 수수료 − 거래세). ETF는 거래세 면제
 const coNet=(h,fee)=>h.price*(1-fee-(isEtfName(h.name)?0:0.002));
-const coPnl=(h,qty,fee)=>(h.price-h.avg)*qty-h.price*qty*(fee+(isEtfName(h.name)?0:0.002));
+// 실현손익 = 매도 실수령 − 매수 원가(매수 수수료 포함). 예상이익(holdGainHtml)과 같은 기준
+const coPnl=(h,qty,fee)=>(coNet(h,fee)-h.avg*(1+fee))*qty;
 function calcCashOut(){
   const msg=$("coMsg");
   if(!lastHoldings.length){msg.textContent="보유 종목을 먼저 불러오세요.";return;}
@@ -2788,10 +2767,14 @@ initTradeDates();
 
 /* ===== 장중 시계 + 자동 갱신(1분, 오늘분만) ===== */
 // 사용자 PC 시간대와 무관하게 KST 기준으로 장중을 판정한다(정규장 평일 09:00~15:30).
+// 공휴일(HOLIDAYS, 근무 일정 데이터 블록)과 연말 휴장일(12/31)에는 열리지 않는다. 임시공휴일은 HOLIDAYS에 넣어야 반영된다
 function marketState(){
   const kst=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
   const day=kst.getDay(), m=kst.getHours()*60+kst.getMinutes();
+  const ymd=`${kst.getFullYear()}-${String(kst.getMonth()+1).padStart(2,"0")}-${String(kst.getDate()).padStart(2,"0")}`;
   if(day===0||day===6)return{open:false,label:"주말 휴장"};
+  if(HOLIDAYS[ymd])return{open:false,label:`${HOLIDAYS[ymd]} 휴장`};
+  if(ymd.slice(5)==="12-31")return{open:false,label:"연말 휴장"};
   if(m>=540&&m<=930)return{open:true,label:"🟢 장중"};
   return{open:false,label:"🔴 장 마감"};
 }
@@ -3002,39 +2985,25 @@ function renderPnl(buyAmt,sellAmt,byAcct,costAmt){
       +`<b style="color:${pc}">(손익 ${p>=0?"+":""}${won(p)} · ${p>=0?"+":""}${rt.toFixed(2)}%)</b>${warn}`;
   }).join("<br>");
   // 누계를 그냥 나열하면 손익과 무관한 숫자로 오해된다. 어떻게 원금이 나왔는지 검산식으로 보인다.
-  const proof=(n,buy,sell,ca,ev,cnt,na,cost)=>{
-    const net=buy-sell+(cost||0), ast=na||(ev+ca), gap=ast-(ev+ca);
+  const proof=(n,buy,sell,ca,ev,cnt,cost)=>{
+    const net=buy-sell+(cost||0), ast=ev+ca;
     return `<b>${esc(n)}</b>${cnt!=null?` <span style="color:var(--muted)">체결 ${cnt}건</span>`:""}`
       +`<br><span style="padding-left:10px">순투입 ${won(net)} = 매수 ${won(buy)} − 매도 ${won(sell)} + 수수료·세금(추정) ${won(cost||0)}</span>`
       +`<br><span style="padding-left:10px">투입원금 ${won(net+ca)} = 순투입 + 현금 ${won(ca)}</span>`
-      +`<br><span style="padding-left:10px">총자산 ${won(ast)} = ${na?`증권사 순자산 (주식 ${won(ev)} + 현금 ${won(ca)}보다 ${won(gap)} 많음: 미수·정산 대기분)`:`주식 ${won(ev)} + 현금 ${won(ca)}`}</span>`
+      +`<br><span style="padding-left:10px">총자산 ${won(ast)} = 주식 ${won(ev)} + 현금(D+2) ${won(ca)}</span>`
       +`<br><span style="padding-left:10px">손익 ${won(ast-net-ca)} = 총자산 − 투입원금</span>`;
   };
   const detail=names.map(n=>{
     const s=sums.find(x=>x.account===n), t=(byAcct||{})[n]||{buy:0,sell:0,cost:0,n:0};
-    return proof(n,t.buy,t.sell,s?(s.cashD2||s.cash||0):0,s?evalOf(s):0,t.n,0,t.cost);
+    return proof(n,t.buy,t.sell,s?(s.cashD2||s.cash||0):0,s?evalOf(s):0,t.n,t.cost);
   }).join("<br>");
-  // 증권사 앱 표시값과 어느 항목이 맞는지 바로 대조할 수 있게 총자산 후보를 나란히 보인다
-  const cand=[
-    ["순자산 nass_amt (현재 사용중)",lastBal.netAsset],
-    ["총평가 tot_evlu_amt",lastBal.totalEval],
-    ["주식평가 + 예수금",evalSum+cash],
-    ["주식평가 + 예수금총액",evalSum+(lastBal.cashD2||0)],
-    ["예수금 dnca_tot_amt",cash],
-    ["예수금총액 prvs_rcdl_excc_amt",lastBal.cashD2],
-    ["주식평가 scts_evlu_amt",lastBal.stockEval],
-    ["매입금액 pchs_amt_smtl_amt",lastBal.purchase],
-    ["평가손익 evlu_pfls_smtl_amt",lastBal.evalPnl],
-  ].map(x=>`<span style="padding-left:10px">${x[0]}: <b>${won(x[1]||0)}</b></span>`).join("<br>");
-  // 잔고 원본 필드를 보여줘야 예수금·순자산 항목 차이를 그 자리에서 확인할 수 있다
-  const raw2=lastBal.raw2?`<br><br><b>잔고 응답 원본(첫 계좌)</b><pre style="white-space:pre-wrap;font-size:11px;margin:4px 0 0">${esc(JSON.stringify(lastBal.raw2,null,1))}</pre>`:"";
   note.innerHTML=(lines?lines+"<br>":"")
     +"배당금 입금·타사 대체입고·계좌 간 이체가 있으면 원금이 실제와 달라지는 추정치예요."
     +(cash?"":' <span style="color:#f5a623">예수금이 0이라 원금이 실제보다 적게 나옵니다.</span>')
     +`<details style="margin-top:6px"><summary style="cursor:pointer">계산 근거 보기</summary>`
-    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,0,costAmt)}`
+    +`<div style="padding:6px 0 0 8px">${detail}<br>${proof("합계",buyAmt,sellAmt,cash,evalSum,null,costAmt)}`
     +(cf.inn>0?`<br><span style="padding-left:10px">입금 기록 기준 원금 ${won(cf.net)} (역산값 ${won(backed)}과 ${won(Math.abs(cf.net-backed))} 차이)</span>`:"")
-    +`<br><br><b>총자산 후보값 (증권사 앱 표시값과 대조하세요)</b><br>${cand}${raw2}</div></details>`;
+    +`</div></details>`;
 }
 function renderTrades(list){
   list=list||[];
@@ -3098,11 +3067,7 @@ function renderTrades(list){
       <td class="up">매수 ${won(buyAmt)}</td>
       <td class="down">매도 ${won(sellAmt)}</td>
     </tr></tfoot>
-  </table>
-  <details style="margin-top:10px">
-    <summary class="hint" style="cursor:pointer">원본 응답 필드 보기</summary>
-    <pre style="white-space:pre-wrap;font-size:11px;color:var(--muted);max-height:240px;overflow:auto">${esc(JSON.stringify(list[0],null,2))}</pre>
-  </details>`;
+  </table>`;
 }
 
 /* ===== 입출금 · 배당 기록 ===== */
@@ -3803,7 +3768,6 @@ switchDept(localStorage.getItem("curDept")||"fin");
 gcalStatus(""); if(gcalOn())gcalRefresh();
 
 /* ===== 자동 기록 초기화 (마지막에 실행) ===== */
-$("apiKey").addEventListener("change",()=>autoSaveFile());
 initFileSync();
 
 // 식품 재고는 휴대폰에서도 넣으므로, 열 때와 탭으로 돌아올 때 조용히 맞춘다.

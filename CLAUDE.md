@@ -154,7 +154,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ch는 칸 자신의 글꼴로 재므로 `.pricecell`은 보통 굵기로 두고 통합 행·머리글·합계의 금액만 굵게 한다
 - 같은 종목을 2개 이상 계좌에 보유하면 통합 행(`mergeHoldings`)을 붙인다. 합계에서는 통합 행을 제외한다
 - 합계 줄의 가격 칸 값은 목표가 × 수량 합계("목표 평가")이고, 전체 수익률은 "합계" 글자 옆에 표시한다
-- 1분 자동 갱신: "자동 갱신(1분)"(`trAuto`)이 켜져 있고 장중(KST 평일 09:00~15:30)일 때 `refreshToday()`가 잔고·오늘 체결·실현손익을 다시 받아 `showHoldings()`로 표 전체를 다시 그린다. 불러오기(`loadTrades`) 후 장중이면 자동으로 켜진다
+- 1분 자동 갱신: "자동 갱신(1분)"(`trAuto`)이 켜져 있고 장중(KST 평일 09:00~15:30, `HOLIDAYS`의 공휴일과 12/31 연말 휴장 제외 — `marketState`)일 때 `refreshToday()`가 잔고·오늘 체결·실현손익을 다시 받아 `showHoldings()`로 표 전체를 다시 그린다. 불러오기(`loadTrades`) 후 장중이면 자동으로 켜진다
 - 수수료율은 계좌명으로 정한다(`acctFee`: "우대" 0.0016%, 그 외 0.015%). 목표수익률은 입력칸 `hTarget`
 - 추가 매수 칸: 현재가로 n주를 더 살 때의 새 매입가·본전가·필요 금액(`addBuyHtml`). 가정용이라 저장하지 않고 메모리 `addBuyQty`(키 `htKey`)에만 두어 자동 갱신 재렌더에도 유지된다. 입력칸 옆 "≈현재가 n주"(`addBuyNeed`)는 새 매입가가 현재가와 1천원(`ADD_BUY_GAP`) 미만이 되는 최소 수량이다. 현재가로 사면 매입가는 현재가에 수렴할 뿐 같아지지 않으므로 이 기준을 쓴다. 필요 금액이 그 계좌 예수금(`acctCash`: `lastBal.summary`의 `cashD2||cash`)보다 많으면 적색, 잔고를 아직 못 받았으면 색을 바꾸지 않는다
 
@@ -164,7 +164,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `price`(기본, `?symbol=`) → `getFull()`: 현재가+종목명+일봉+재무/ETF를 **토큰 1개로 한 번에** 반환. 주식 분석 조회용
 - `quote` → 경량 현재가. 실시간 폴링용
-- `daily` / `finance` / `debug` → 개별 조회 및 원본 필드 진단
+- `daily` / `finance` → 개별 조회
 - `balance` → 계좌 전체 잔고 통합. 종목코드 불필요
 - `trades` → 기간 체결내역(`from`/`to`, 기본 3개월). 오래된 기간은 tr_id가 다르다(`tradeTrId`)
 - `realized` → 기간별 일별 실현손익(기본 6개월)
@@ -176,9 +176,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **접근 토큰**: Vercel에 `DASH_TOKEN`을 설정하면 `x-dash-token` 헤더가 같은 요청만 통과한다(`authFailed`, 미설정이면 전부 통과). 프론트는 `dashToken`을 저장해 `kisFetch()`가 헤더로 붙인다. 쿼리스트링으로 받지 않는다.
 
-토큰은 **앱키별로** 2단 캐시(프로세스 메모리 `tokenCaches` + Vercel KV). KIS 토큰은 24h 유효하므로 매 호출 발급하면 안 된다. KV 미설정 시에도 메모리 캐시로 동작한다.
+토큰은 **앱키별로** 2단 캐시(프로세스 메모리 `tokenCaches` + Vercel KV). KV에는 `{token, exp}` JSON으로 만료 시각까지 넣어, 다른 인스턴스가 읽어도 남은 수명만큼만 메모리에 둔다(예전 형식인 토큰 문자열은 5분만). KIS 토큰은 24h 유효하므로 매 호출 발급하면 안 된다. KV 미설정 시에도 메모리 캐시로 동작한다.
 
 계좌는 `KIS_ACCT{1..4}_NO/APPKEY/APPSECRET/NAME` 환경변수로 최대 4개까지 자동 인식한다(`acctConfigs`). **KIS는 계좌마다 API 키가 다르므로** 계좌별 키가 필수이고, 시세 조회용 `KIS_APPKEY`와는 별개다. 잔고·체결·실현손익 조회는 KIS 초당 호출 제한 때문에 계좌 간 600ms 지연이 들어 있고, 잔고는 제한 감지 시 1초 후 1회 재시도한다(`getBalance`). 여기에 계좌를 더 추가하거나 병렬화하면 rate limit에 걸린다.
+
+서버는 UTC라 기본 조회 기간의 "오늘"은 `kstNow()`로 한국 날짜를 쓴다(`today`·`monthsAgo`·`tradeTrId`).
 
 `KIS_ENV=mock`이면 모의투자 서버(BASE URL과 계좌 계열 `tr_id`가 함께 바뀜).
 
@@ -186,6 +188,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 같은 개념이 여러 곳에 다른 방식으로 구현되어 있으므로 한쪽만 고치지 말 것:
 
+- **실현손익 공식** — 매도 실수령 − 매수 원가(매수 수수료 포함) = `(price*(1-fee-tax) - avg*(1+fee))*qty`. `holdGainHtml`·`mergedGainHtml`(예상이익), `coPnl`(목표 현금), `calcSwitch`(손절 후 재매수 확정 손익)가 같은 기준이다
 - **본전가·목표가 공식** — `avg*(1+fee)/(1-fee-tax)` 형태가 `calcSwitch()`(손절 후 재매수), `renderHoldings()`(보유종목), `htTargetPrice()`·`holdGainHtml()`(목표 입력·예상이익), `addBuyHtml()`(추가 매수)에 각각 있다
 - **월 총지출 공식** — 카드 반영액(체크분, `cardSums`) + 카드 외 정기지출 + 카드외 비정기. `renderExpAll()`(화면 합계)과 `monthTotals()`(추이 그래프)에 따로 있다. 카드 부분은 둘 다 `cardSums()`를 공유한다
 - **수수료·세금 추정(`tradeCost`)** — 체결금액에는 비용이 빠져 있어 원금 역산에 더한다. 손익 요약(`renderPnl`, `renderTrades` 집계)과 자산 추이(`loadEquity`의 원금·과거 현금)가 같은 함수를 쓴다. 수수료율은 `acctFee`, 거래세 0.2%(ETF 면제)
