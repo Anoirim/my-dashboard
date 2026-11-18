@@ -1,8 +1,9 @@
 // KIS(한국투자증권) OpenAPI 프록시 - Vercel 서버리스 함수
-// 환경변수: KIS_APPKEY, KIS_APPSECRET  (모의투자면 KIS_ENV=mock 추가), 계좌별 KIS_ACCT{1..4}_*, ECOS_KEY, DASH_TOKEN
+// 환경변수: KIS_APPKEY, KIS_APPSECRET  (모의투자면 KIS_ENV=mock 추가), 계좌별 KIS_ACCT{1..4}_*, ECOS_KEY, DASH_TOKEN, KIS_HTS_ID(조건검색)
 // 호출(?action=):
 //   price(기본, symbol) 현재가+이름+일봉+재무/ETF · quote(symbol) 경량 현재가 · daily(symbol) 일봉 · finance(symbol) 재무비율
-//   minute(symbol, date, hour, count) 1분봉(실전계좌 전용) · rank(market, sort, rate1, rate2) 등락률 순위(실측 중)
+//   minute(symbol, date, hour, count) 1분봉(실전계좌 전용) · rank(market, sort, rate1, rate2) 등락률 순위
+//   cond 조건검색 목록 · condResult(seq) 조건검색 결과 (KIS_HTS_ID 필요)
 //   balance 잔고 · trades(from,to) 체결내역 · realized(from,to) 일별 실현손익 · index(code) 지수 일봉
 //   macro(stat,item | kind=list/items) 한국은행 ECOS · news(q) 구글 뉴스 RSS
 
@@ -188,6 +189,47 @@ async function getRank(market, sort, rate1, rate2) {
     })),
     rawKeys: rows.length ? Object.keys(rows[0]) : null,
     rtCd: j.rt_cd, msg: j.msg1 || null,
+  };
+}
+
+// 종목조건검색 — HTS [0110]에 저장한 사용자 조건으로 KIS가 걸러 준 종목을 받는다 (7대 기술 6번 후보 고르기)
+// 등락률 순위는 1회 30건·다음 장 없음이라 3~8% 종목이 대부분 잘린다(2026-11-19 실측). 그래서 이 방식을 쓴다.
+// - 목록 HHKST03900300 psearch-title(output2의 seq가 조건 키), 결과 HHKST03900400 psearch-result(조건당 최대 100건)
+// - user_id는 HTS ID라 코드에 두지 않고 환경변수 KIS_HTS_ID로 받는다
+// - HTS에서 조건을 바꾸면 [0110] 화면 왼쪽 아래 "사용자조건 서버저장"을 눌러야 API에 반영된다(공식 예제 주석)
+// - 결과가 0개면 KIS가 "종목코드 오류"(MCA05918)를 준다 → 빈 목록으로 바꿔 돌려준다
+// 응답 칸 이름은 공식 예제의 COLUMN_MAPPING을 따랐고 단위(시가총액 등)는 실측 전이라 rawSample을 함께 준다.
+function htsId() {
+  const id = process.env.KIS_HTS_ID;
+  if (!id) throw new Error("Vercel 환경변수 KIS_HTS_ID(HTS 로그인 ID)가 설정되지 않았습니다.");
+  return id;
+}
+async function getCondList() {
+  const token = await getToken();
+  const url = BASE + "/uapi/domestic-stock/v1/quotations/psearch-title?user_id=" + encodeURIComponent(htsId());
+  const j = await (await fetch(url, { headers: headers(token, "HHKST03900300") })).json();
+  const rows = j.output2 || [];
+  return {
+    conds: rows.map((x) => ({ seq: String(x.seq), name: x.condition_nm || x.cond_nm || x.name || null })),
+    rawKeys: rows.length ? Object.keys(rows[0]) : null,
+    rtCd: j.rt_cd, msg: j.msg1 || null,
+  };
+}
+async function getCondResult(seq) {
+  const token = await getToken();
+  const url = BASE + "/uapi/domestic-stock/v1/quotations/psearch-result?user_id=" + encodeURIComponent(htsId()) + "&seq=" + seq;
+  const j = await (await fetch(url, { headers: headers(token, "HHKST03900400") })).json();
+  if (j.msg_cd === "MCA05918") return { seq, rows: [], count: 0, msg: "조건에 맞는 종목이 없습니다." };
+  const rows = j.output2 || [];
+  return {
+    seq, count: rows.length,
+    rows: rows.map((x) => ({
+      code: x.code, name: x.name, price: num(x.price), rate: num(x.chgrate),
+      vol: num(x.acml_vol), volRate: num(x.chgrate2), cap: num(x.stotprice),
+    })),
+    rawKeys: rows.length ? Object.keys(rows[0]) : null,
+    rawSample: rows[0] || null,
+    rtCd: j.rt_cd, msgCd: j.msg_cd || null, msg: j.msg1 || null,
   };
 }
 
@@ -631,6 +673,15 @@ module.exports = async function handler(req, res) {
       const sort = /^\d{1,4}$/.test(String(req.query.sort || "")) ? String(req.query.sort) : "0";
       const rate = (v) => (/^-?\d+(\.\d+)?$/.test(String(v || "")) ? String(v) : "");
       res.status(200).json(await getRank(mk, sort, rate(req.query.rate1), rate(req.query.rate2)));
+      return;
+    }
+
+    // 조건검색: cond = HTS에 저장한 조건 목록, condResult(seq) = 그 조건의 종목(최대 100)
+    if (action === "cond") { res.status(200).json(await getCondList()); return; }
+    if (action === "condResult") {
+      const seq = String(req.query.seq || "");
+      if (!/^\d{1,4}$/.test(seq)) return res.status(400).json({ error: "seq(조건 번호)를 입력하세요." });
+      res.status(200).json(await getCondResult(seq));
       return;
     }
 
