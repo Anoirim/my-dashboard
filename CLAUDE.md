@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 탭 (`data-dept`) | 카드 |
 |---|---|
 | 총무부 (`general`) | 타이머, 하원 일정, 스케줄러, 안약 복용(달력 — 일정·결제일·근무 함께 표시), 식품 재고 |
-| 투자연구소 (`research`) | 시장 일정, 시초가 30분 판정, 손절 후 재매수 계산, 주식 분석 |
+| 투자연구소 (`research`) | 시장 일정, 손절 후 재매수 계산, 시초가 30분 판정, 주식 분석 |
 | 재무부 (`fin`) | 내 계좌 현황(체결 조회·실현손익·보유종목·자산 추이), 목표 현금 만들기, 입출금·배당 기록 |
 | 관리부 (`mgmt`) | 월 지출 관리 |
 
@@ -155,6 +155,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 시초가 = 09:00 봉 시가. 이탈·돌파는 09:30 가격(마지막 봉 종가)으로 본다(사용자 결정 — 고가·저가로 보면 한 틱만 스쳐도 뒤집힌다)
 - 방향은 **30분 중간에 꺾인 곳**으로 정한다. "고가·저가 중 먼저 나온 쪽"으로 정하면 시초가 자체가 저가인 날(올랐다가 시초가 위에서 멈춤)을 하락 후 반등으로 거꾸로 본다
 - 판정 버튼 방식이다(09:30 자동 판정 없음). 지난 날짜도 고를 수 있다(분봉 약 1년 보관)
+- 종목명은 일봉 조회(`fetchStockName` → `action=daily`)에서 받는다. `quote`(현재가)에는 이름 칸이 없어 코드가 온다
+- **주식 분석 카드와는 합치지 않고 연결만 한다**(한 종목 깊게 vs 여러 종목 비교, 해외는 분봉 없음, 5초 갱신 vs 하루 1회). 칩·결과 종목명 → `analyzeHolding(code)`(보유종목 표와 같은 함수)로 주식 분석 조회, 주식 분석 → "☆ 관심종목 추가"(`toggleWatchFromStock`, 이름은 마지막 전체 조회의 `lastStockKR`). 별 표시는 `renderWatch()`가 `renderStockWatchBtn()`까지 불러 맞춘다
+- `renderStockWatchBtn()`은 초기화 때 `onMarketChange()`에서 불린다. `watchStocks`가 뒤 블록에 선언돼 있어 `lastStockKR`이 없으면 먼저 돌아가야 한다(TDZ)
 
 ### 보유종목 표 (`renderHoldings`)
 

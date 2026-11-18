@@ -402,30 +402,6 @@
       </div>
     </div>
 
-    <!-- 시초가 30분 판정 -->
-    <div class="card full" data-dept="research">
-      <h2><span class="dot" style="background:#33d69f"></span>시초가 30분 판정
-        <span id="opStat" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
-      <div class="row" style="margin-bottom:10px">
-        <input type="text" id="opCode" placeholder="관심종목 코드 6자리 (예: 005930)" style="flex:1" onkeydown="if(event.key==='Enter')addWatch()">
-        <button class="ghost" onclick="addWatch()">관심종목 추가</button>
-      </div>
-      <div id="opWatch" class="row" style="margin-bottom:12px"></div>
-      <div class="row" style="margin-bottom:12px;align-items:center">
-        <input type="date" id="opDate" title="오늘이 기본입니다. 지난 날을 고르면 그날을 다시 판정합니다(약 1년 전까지).">
-        <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px">변동 없음 기준
-          <input type="number" id="opFlat" min="0.1" step="0.1" style="width:72px" onchange="setOpFlat(this.value)"
-            title="30분 동안 고가와 저가 차이가 시초가의 이 비율보다 작으면 '변동 없음'으로 봅니다.">%</label>
-        <button onclick="judgeOpen()">판정</button>
-      </div>
-      <div id="opList"></div>
-      <div class="hint" style="margin-top:8px">
-        09:00~09:30 1분봉으로 노션 메모 "주식으로 돈 버는 사람들의 7대 핵심 기술" 1~5번을 적용합니다.
-        시초가 = 09:00 봉 시가, 이탈·돌파는 09:30 가격으로 판정합니다. 30분 중간에 고점을 찍고 내려왔으면 "상승 후 하락", 중간에 저점을 찍고 올라왔으면 "하락 후 반등"입니다.
-        참고용 규칙이며 매매 판단은 직접 하세요.
-      </div>
-    </div>
-
     <!-- 손절 후 재매수 계산 -->
     <div class="card full" data-dept="research">
       <h2><span class="dot" style="background:#f5a623"></span>손절 후 재매수 계산</h2>
@@ -453,6 +429,30 @@
       <div class="hint" style="margin-top:8px">수수료·거래세는 아래 보유종목 카드의 수수료율을 씁니다. 국내 정수 주 기준(잔여 현금 표시).</div>
     </div>
 
+    <!-- 시초가 30분 판정 -->
+    <div class="card full" data-dept="research">
+      <h2><span class="dot" style="background:#33d69f"></span>시초가 30분 판정
+        <span id="opStat" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div class="row" style="margin-bottom:10px">
+        <input type="text" id="opCode" placeholder="관심종목 코드 6자리 (예: 005930)" style="flex:1" onkeydown="if(event.key==='Enter')addWatch()">
+        <button class="ghost" onclick="addWatch()">관심종목 추가</button>
+      </div>
+      <div id="opWatch" class="row" style="margin-bottom:12px"></div>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="date" id="opDate" title="오늘이 기본입니다. 지난 날을 고르면 그날을 다시 판정합니다(약 1년 전까지).">
+        <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px">변동 없음 기준
+          <input type="number" id="opFlat" min="0.1" step="0.1" style="width:72px" onchange="setOpFlat(this.value)"
+            title="30분 동안 고가와 저가 차이가 시초가의 이 비율보다 작으면 '변동 없음'으로 봅니다.">%</label>
+        <button onclick="judgeOpen()">판정</button>
+      </div>
+      <div id="opList"></div>
+      <div class="hint" style="margin-top:8px">
+        09:00~09:30 1분봉으로 노션 메모 "주식으로 돈 버는 사람들의 7대 핵심 기술" 1~5번을 적용합니다.
+        시초가 = 09:00 봉 시가, 이탈·돌파는 09:30 가격으로 판정합니다. 30분 중간에 고점을 찍고 내려왔으면 "상승 후 하락", 중간에 저점을 찍고 올라왔으면 "하락 후 반등"입니다.
+        참고용 규칙이며 매매 판단은 직접 하세요.
+      </div>
+    </div>
+
     <!-- 주식 -->
     <div class="card full" data-dept="research">
       <h2><span class="dot" style="background:#f5a623"></span>주식 분석</h2>
@@ -470,7 +470,10 @@
         <div class="hint">해외 주식용. 무료 키: <a href="https://finnhub.io/register" target="_blank">finnhub.io/register</a>. 키는 이 브라우저에만 저장됩니다.</div>
       </div>
       <div id="stockResult" style="display:none">
-        <div id="stockName" style="font-size:18px;font-weight:700;margin-bottom:4px"></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+          <div id="stockName" style="font-size:18px;font-weight:700"></div>
+          <button class="ghost" id="stockWatchBtn" style="display:none;padding:4px 10px;font-size:12px" onclick="toggleWatchFromStock()"></button>
+        </div>
         <div class="stock-head">
           <div class="price" id="stockPrice">-</div>
           <div class="chg" id="stockChg">-</div>
@@ -2168,12 +2171,31 @@ function calcSwitch(){
 
 /* ===== 주식 (국내 KIS / 해외 Finnhub) ===== */
 let chart=null;
+// 마지막으로 전체 조회한 국내 종목. 관심종목 버튼이 이름을 다시 받지 않고 쓴다(실시간 quote에는 이름이 없다)
+let lastStockKR=null;
+// 관심종목(watchStocks)은 아래 시초가 판정 블록에 선언돼 있다. 초기화 때 onMarketChange가 이 함수를 부르므로
+// lastStockKR이 없으면 watchStocks에 닿기 전에 돌아가야 TDZ로 멈추지 않는다
+function renderStockWatchBtn(){
+  const b=$("stockWatchBtn");
+  if(!lastStockKR){b.style.display="none";return;}
+  const on=watchStocks.some(s=>s.code===lastStockKR.code);
+  b.style.display="";
+  b.textContent=on?"★ 관심종목":"☆ 관심종목 추가";
+  b.title=on?"누르면 시초가 판정 관심종목에서 뺍니다":"시초가 30분 판정의 관심종목에 넣습니다";
+}
+function toggleWatchFromStock(){
+  if(!lastStockKR)return;
+  const i=watchStocks.findIndex(s=>s.code===lastStockKR.code);
+  if(i>=0)watchStocks.splice(i,1); else watchStocks.push({...lastStockKR});
+  saveWatch(); renderWatch(); // renderWatch가 이 버튼도 다시 그린다
+}
 $("apiKey").value = localStorage.getItem("finnhubKey")||"";
 $("apiKey").addEventListener("change",e=>{localStorage.setItem("finnhubKey",e.target.value.trim());autoSaveFile();});
 $("ticker").addEventListener("keydown",e=>{if(e.key==="Enter")loadStock();});
 
 function onMarketChange(){
   const kr=$("market").value==="kr";
+  lastStockKR=null; renderStockWatchBtn(); // 해외로 바꾸면 관심종목(국내 분봉 전용) 버튼을 숨긴다
   $("finnhubBox").style.display=kr?"none":"block";
   $("ticker").placeholder=kr?"국내 6자리 코드 (예: 005930)":"해외 코드 (예: AAPL, TSLA)";
   $("ticker").style.textTransform=kr?"none":"uppercase";
@@ -2204,7 +2226,8 @@ async function loadStockKR(silent){
     const d=await kisFetch((silent?"?action=quote&symbol=":"?symbol=")+sym);
     if(d.error){msg.textContent="오류: "+d.error;return;}
     const up=d.diff>=0;
-    const nm=(d.name&&d.name!==sym)?d.name:sym;
+    // 실시간(silent) quote에는 이름 칸이 없어 코드가 온다. 같은 종목을 전체 조회해 둔 이름이 있으면 그걸 쓴다
+    const nm=(d.name&&d.name!==sym)?d.name:(lastStockKR&&lastStockKR.code===sym?lastStockKR.name:sym);
     $("stockName").textContent=(nm!==sym)?`${nm} (${sym})`:sym;
     $("stockPrice").textContent=d.price.toLocaleString("ko-KR")+"원";
     $("stockChg").textContent=(up?"▲ +":"▼ ")+d.diff.toLocaleString("ko-KR")+" ("+d.rate+"%)";
@@ -2228,6 +2251,7 @@ async function loadStockKR(silent){
     if(!silent){
       // 전체 응답에 재무·차트 포함
       lastFinanceKR=(d.roe!=null||d.debtRatio!=null)?{roe:d.roe,debtRatio:d.debtRatio}:null;
+      lastStockKR={code:sym,name:nm}; renderStockWatchBtn();
       renderEasyKR(d,up);
       if(d.candles&&d.candles.length>1)drawDailyKR(d.candles,nm,hAvg,hBep);else drawSimpleKR(d);
     }
@@ -2686,10 +2710,12 @@ function showHoldings(hs){
   fillSwStockOptions(); // 손절재매수 계산기 종목 목록도 함께 갱신
 }
 // 보유종목 행 클릭 → 투자연구소 주식분석에서 그 종목을 조회한다(간이 차트 제거, 전체 분석 재사용).
+// 보유종목 표와 시초가 판정(관심종목 칩·결과 종목명)에서 부른다
 function analyzeHolding(code){
   $("market").value="kr"; onMarketChange();
   $("ticker").value=code;
   switchDept("research");
+  $("ticker").closest(".card").scrollIntoView({behavior:"smooth",block:"start"}); // 투자연구소 탭 아래쪽 카드라 화면에 안 보일 수 있다
   loadStock();
 }
 // 매도 실수령 = 수량 × 현재가 × (1 − 수수료 − 거래세). ETF는 거래세 면제
@@ -3779,9 +3805,10 @@ function setOpFlat(v){
 function renderWatch(){
   $("opFlat").value=opFlatPct;
   $("opWatch").innerHTML=watchStocks.map((s,i)=>
-    `<span class="mk-tag" style="display:inline-flex;align-items:center;gap:4px">${esc(s.name||s.code)} <small style="opacity:.7">${s.code}</small>
+    `<span class="mk-tag" style="display:inline-flex;align-items:center;gap:4px"><span class="hold-link" title="주식 분석에서 조회" onclick="analyzeHolding('${s.code}')">${esc(s.name||s.code)}</span> <small style="opacity:.7">${s.code}</small>
       <button class="del" style="padding:0 2px" title="관심종목에서 빼기" onclick="delWatch(${i})">×</button></span>`
-  ).join("")||'<span class="hint" style="margin:0">관심종목을 추가하세요.</span>';
+  ).join("")||'<span class="hint" style="margin:0">관심종목을 추가하세요. 주식 분석에서 국내 종목을 조회한 뒤 "☆ 관심종목 추가"로도 넣을 수 있습니다.</span>';
+  renderStockWatchBtn(); // 칩을 추가·삭제하면 주식 분석의 별 표시도 맞춘다
 }
 // 종목명은 일봉 조회(action=daily)의 output1에만 있다. 현재가 조회(quote)는 이름 칸이 없어 코드를 돌려준다.
 // 최근 2주만 받아 가볍게 부르고, 이름이 없으면 없는 코드로 본다(틀린 코드를 목록에 남기지 않음)
@@ -3833,7 +3860,7 @@ function opJudge(cs,flatPct){
   return r;
 }
 function opRowHtml(s,res){
-  const head=`<span class="nm">${esc(s.name||s.code)} <small style="color:var(--muted)">${s.code}</small></span>`;
+  const head=`<span class="nm"><span class="hold-link" title="주식 분석에서 조회" onclick="analyzeHolding('${s.code}')">${esc(s.name||s.code)}</span> <small style="color:var(--muted)">${s.code}</small></span>`;
   if(res.err)return `<div class="mk-item">${head}<span class="why" style="color:var(--danger)">${esc(res.err)}</span></div>`;
   const r=res.r;
   if(!r)return `<div class="mk-item">${head}<span class="why">그날 09:00~09:30 분봉이 없습니다(휴장일이거나 장 시작 전).</span></div>`;
