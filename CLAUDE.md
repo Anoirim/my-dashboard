@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 탭 (`data-dept`) | 카드 |
 |---|---|
 | 총무부 (`general`) | 타이머, 하원 일정, 스케줄러, 안약 복용(달력 — 일정·결제일·근무 함께 표시), 식품 재고 |
-| 투자연구소 (`research`) | 시장 일정, 손절 후 재매수 계산, 시초가 30분 판정, 주식 분석 |
+| 투자연구소 (`research`) | 시장 일정, 손절 후 재매수 계산, 시초가 30분 판정, 마감 전 후보, 주식 분석 |
 | 재무부 (`fin`) | 내 계좌 현황(체결 조회·실현손익·보유종목·자산 추이), 목표 현금 만들기, 입출금·배당 기록 |
 | 관리부 (`mgmt`) | 월 지출 관리 |
 
@@ -74,6 +74,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `cashFlows` | 입출금·배당 기록 |
 | `equitySnap` | 자산 추이 오늘 스냅샷 |
 | `watchStocks`, `opFlatPct` | 시초가 30분 판정의 관심종목 `[{code, name}]`, "변동 없음" 기준 %(기본 1) |
+| `condSeq` | 마감 전 후보 카드가 쓰는 HTS 조건검색 조건 번호 |
 | `curDept` | 선택한 부서 탭 |
 | `dashToken`, `finnhubKey` | 프록시 접근 토큰, Finnhub API 키 |
 
@@ -160,6 +161,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **주식 분석 카드와는 합치지 않고 연결만 한다**(한 종목 깊게 vs 여러 종목 비교, 해외는 분봉 없음, 5초 갱신 vs 하루 1회). 칩·결과 종목명 → `analyzeHolding(code)`(보유종목 표와 같은 함수)로 주식 분석 조회, 주식 분석 → "☆ 관심종목 추가"(`toggleWatchFromStock`, 이름은 마지막 전체 조회의 `lastStockKR`). 별 표시는 `renderWatch()`가 `renderStockWatchBtn()`까지 불러 맞춘다
 - `renderStockWatchBtn()`은 초기화 때 `onMarketChange()`에서 불린다. `watchStocks`가 뒤 블록에 선언돼 있어 `lastStockKR`이 없으면 먼저 돌아가야 한다(TDZ)
 
+### 마감 전 후보 (`/* ===== 마감 전 후보 (7대 기술 6번) ===== */`)
+
+"7대 기술" 6번(미리 고르고 마감 직전 매수)의 후보를 KIS 종목조건검색으로 받는다. 걸러내기는 한국투자 HTS [0110]에 저장한 조건("마감전 후보")이 하고, 대시보드는 보여주기만 한다. 조건 내용과 HTS 설정 주의점은 `대시보드-프로젝트-정리.md` 3절 `KIS_HTS_ID` 항목.
+
+- 등락률 순위 API(`action=rank`)는 1회 30건·다음 장 없음이라 3~8% 종목이 대부분 잘려 쓰지 않는다(실측). `rank`는 프록시에 남아 있다
+- 결과 칸 단위(실측): `cap` 억 원, `volRate`(=`chgrate2`) 전일 거래량 대비율 % → 화면엔 ÷100 "배". 거래량 비율 큰 순으로 정렬
+- 조건당 100건 한도(`CC_LIMIT`). 100건이면 "일부 빠졌을 수 있음" 경고. 장중 14:50 전·장 마감 후에는 시각 경고
+- 7번(장기 하락)은 후보마다 일봉이 필요해 여기서 보지 않는다. ☆로 관심종목에 넣으면 시초가 판정에서 붙는다
+- ☆/★는 `renderWatch()`가 `renderCondRows()`까지 불러 맞춘다. 판정 블록이 이 블록보다 앞이라 `condRows`는 **`var`**로 선언했다(초기 `renderWatch()` 때 TDZ 방지)
+
 ### 보유종목 표 (`renderHoldings`)
 
 - 가격 칸은 한 칸에 3단: 매입가 (본전가) / 현재가 (증감/손익률) / 목표가 (+X%). 평가금액 칸은 2단: 매입금 / 평가금액 (평가손익)
@@ -179,6 +190,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `quote` → 경량 현재가. 실시간 폴링용
 - `daily` / `finance` → 개별 조회
 - `minute` → 1분봉(`date` YYYYMMDD 기본 오늘, `hour` HHMMSS 기본 093000, `count` 기본 31·최대 120). 주식일별분봉조회 `FHKST03010230` 1회 호출, **실전계좌 전용**(mock이면 안내 문구). 칸 이름은 공식 문서에 없어 2026-11-18 실측으로 확정. 과거 데이터 포함이라 전날 봉이 섞여 와서 요청 날짜만 남긴다
+- `rank` → 등락률 순위(`market` 0000/0001/1001, `rate1`·`rate2` 범위). 1회 30건·다음 장 없음(실측)이라 지금은 화면에서 쓰지 않음
+- `cond` / `condResult`(`seq`) → 종목조건검색 목록·결과(조건당 100건). `KIS_HTS_ID` 환경변수 필요. 결과 0건이면 KIS가 `MCA05918`(종목코드 오류)을 주는데 빈 목록으로 바꾼다
 - `balance` → 계좌 전체 잔고 통합. 종목코드 불필요
 - `trades` → 기간 체결내역(`from`/`to`, 기본 3개월). 오래된 기간은 tr_id가 다르다(`tradeTrId`)
 - `realized` → 기간별 일별 실현손익(기본 6개월)

@@ -454,6 +454,24 @@
       </div>
     </div>
 
+    <!-- 마감 전 후보 (7대 기술 6번) -->
+    <div class="card full" data-dept="research">
+      <h2><span class="dot" style="background:#c77dff"></span>마감 전 후보
+        <span id="ccStat" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <select id="ccSel" style="flex:1;min-width:160px" onchange="setCondSeq(this.value)" title="한국투자 HTS [0110]에 저장하고 '사용자조건 서버저장'을 누른 조건">
+          <option value="">조건 목록을 불러오세요</option>
+        </select>
+        <button onclick="loadCondCands()">후보 불러오기</button>
+      </div>
+      <div id="ccWarn"></div>
+      <div id="ccList"></div>
+      <div class="hint" style="margin-top:8px">
+        노션 메모 "7대 기술" 6번: 미리 종목을 고르고 장 마감 전 마지막 구간에 매수. 조건(전일 대비 3~8%, 거래량 전일보다 많음, 시가총액 1,500억 이하, ETF·ETN·스팩·관리종목 제외)은 HTS [0110] "마감전 후보"에 있습니다.
+        거래량 비율 = 오늘 거래량 ÷ 어제 거래량. 종목명을 누르면 주식 분석, ☆를 누르면 시초가 판정 관심종목에 들어갑니다(거기서 7번 장기 하락도 확인). 고르기까지만 돕고 매매 판단은 직접 하세요.
+      </div>
+    </div>
+
     <!-- 주식 -->
     <div class="card full" data-dept="research">
       <h2><span class="dot" style="background:#f5a623"></span>주식 분석</h2>
@@ -711,11 +729,12 @@ function reloadAll(){
   pickupAlarm=localStorage.getItem("pickupAlarm")!=="off";
   watchStocks=JSON.parse(localStorage.getItem("watchStocks")||"[]");
   opFlatPct=+localStorage.getItem("opFlatPct")||1;
+  condSeq=localStorage.getItem("condSeq")||"";
   eyeWaitSec=+localStorage.getItem("eyeWaitSec")||EYE_WAIT_DEFAULT;
   eyeGapSec=+localStorage.getItem("eyeGapSec")||EYE_GAP_DEFAULT;
   eyeAutoTimer=localStorage.getItem("eyeAutoTimer")!=="off";
   renderScheds();renderEye();renderCashFlows();loadMonth(curMonth);
-  renderFoods();renderPickup();renderEyeTimerCfg();renderWatch();
+  renderFoods();renderPickup();renderEyeTimerCfg();renderWatch();renderCondSel();
   // 보유종목은 잔고를 다시 받아야 하므로, 이미 받아둔 값이 있을 때만 다시 그린다
   if(typeof lastHoldings!=="undefined"&&lastHoldings.length)showHoldings(lastHoldings);
 }
@@ -3827,6 +3846,7 @@ function renderWatch(){
       <button class="del" style="padding:0 2px" title="관심종목에서 빼기" onclick="delWatch(${i})">×</button></span>`
   ).join("")||'<span class="hint" style="margin:0">관심종목을 추가하세요. 주식 분석에서 국내 종목을 조회한 뒤 "☆ 관심종목 추가"로도 넣을 수 있습니다.</span>';
   renderStockWatchBtn(); // 칩을 추가·삭제하면 주식 분석의 별 표시도 맞춘다
+  if(typeof renderCondRows==="function"&&condRows&&condRows.length)renderCondRows(); // 마감 전 후보 표의 ☆/★도
 }
 // 종목명은 일봉 조회(action=daily)의 output1에만 있다. 현재가 조회(quote)는 이름 칸이 없어 코드를 돌려준다.
 // 최근 2주만 받아 가볍게 부르고, 이름이 없으면 없는 코드로 본다(틀린 코드를 목록에 남기지 않음)
@@ -3945,6 +3965,86 @@ async function judgeOpen(){
   }finally{opBusy=false;}
 }
 renderWatch();
+
+/* ===== 마감 전 후보 (7대 기술 6번) =====
+   KIS 종목조건검색(action=cond·condResult)으로 HTS [0110]에 저장한 조건의 종목을 받는다.
+   등락률 순위 API는 1회 30건·다음 장 없음이라 3~8% 종목이 대부분 잘려서 쓰지 않는다(2026-11-19 실측).
+   - 조건 고르기: 고른 조건 번호를 condSeq에 기억. 없으면 이름에 "마감"이 들어간 조건, 그것도 없으면 첫 조건
+   - 결과 칸 단위(실측): cap 시가총액 억 원, volRate 전일 거래량 대비율 % → 화면에는 배(÷100)
+   - 조건당 100건 한도라 100건이면 잘렸을 수 있다고 알린다
+   - 7번(장기 하락)은 후보마다 일봉이 필요해 여기서는 보지 않는다. ☆로 관심종목에 넣으면 시초가 판정에서 붙는다 */
+const CC_LIMIT=100;
+let condSeq=localStorage.getItem("condSeq")||"";
+let condList=[];
+// var: 앞 블록의 renderWatch()가 초기화 때 renderCondRows()를 부르므로, let이면 선언 전 접근(TDZ)으로 멈춘다
+var condRows=[];
+function setCondSeq(v){
+  condSeq=v; localStorage.setItem("condSeq",v); autoSaveFile();
+}
+function renderCondSel(){
+  const sel=$("ccSel");
+  if(!condList.length){sel.innerHTML='<option value="">조건 목록을 불러오세요</option>';return;}
+  sel.innerHTML=condList.map(c=>`<option value="${c.seq}">${esc(c.name||("조건 "+c.seq))}</option>`).join("");
+  sel.value=condSeq;
+}
+// 마감 직전(14:50~15:30 장중)이 아니면 알린다. 메모는 "장 마감 전 마지막 구간"에 고르는 방식이다
+function condTimeNote(){
+  const st=marketState();
+  if(!st.open)return `${st.label} — 지금 목록은 마지막 거래일 기준일 수 있습니다.`;
+  const kst=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
+  return kst.getHours()*60+kst.getMinutes()<890?"아직 마감 직전(14:50 이후)이 아닙니다. 등락률이 장 마감까지 바뀔 수 있습니다.":"";
+}
+function renderCondRows(){
+  if(!condRows)return; // 초기화 중(아래 var 대입 전) renderWatch에서 불린 경우
+  const warn=[];
+  const tn=condTimeNote(); if(tn)warn.push(tn);
+  if(condRows.length>=CC_LIMIT)warn.push(`${CC_LIMIT}종목 한도가 꽉 찼습니다. 일부가 빠졌을 수 있으니 HTS 조건의 시가총액 상한을 낮추세요.`);
+  $("ccWarn").innerHTML=warn.map(w=>`<div class="fd-warn" style="border-color:#f5a623;background:rgba(245,166,35,.1)">${w}</div>`).join("");
+  if(!condRows.length){$("ccList").innerHTML="";return;}
+  const rows=condRows.slice().sort((a,b)=>(b.volRate||0)-(a.volRate||0)); // 거래량 비율 큰 순
+  $("ccList").innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="color:var(--muted);text-align:right">
+      <th style="text-align:left;padding:6px">종목</th><th style="padding:6px">현재가</th><th style="padding:6px">등락률</th>
+      <th style="padding:6px" title="오늘 거래량 ÷ 어제 거래량">거래량 비율</th><th style="padding:6px">시가총액</th><th style="padding:6px"></th></tr></thead>
+    <tbody>${rows.map(r=>{
+      const on=watchStocks.some(s=>s.code===r.code);
+      return `<tr style="border-top:1px solid var(--border);text-align:right">
+        <td style="text-align:left;padding:6px"><span class="hold-link" title="주식 분석에서 조회" onclick="analyzeHolding('${r.code}')">${esc(r.name||r.code)}</span> <small style="color:var(--muted)">${r.code}</small></td>
+        <td style="padding:6px">${r.price!=null?won(r.price):"-"}</td>
+        <td style="padding:6px" class="${(r.rate||0)>=0?"up":"down"}">${r.rate!=null?(r.rate>=0?"+":"")+r.rate.toFixed(2)+"%":"-"}</td>
+        <td style="padding:6px">${r.volRate!=null?(r.volRate/100).toFixed(2)+"배":"-"}</td>
+        <td style="padding:6px">${r.cap!=null?Math.round(r.cap).toLocaleString("ko-KR")+"억":"-"}</td>
+        <td style="padding:6px"><button class="ghost" style="padding:3px 8px;font-size:12px" title="${on?"시초가 판정 관심종목에서 빼기":"시초가 판정 관심종목에 넣기"}" onclick="toggleWatchFromCond('${r.code}')">${on?"★":"☆"}</button></td>
+      </tr>`;}).join("")}</tbody></table></div>`;
+}
+function toggleWatchFromCond(code){
+  const r=condRows.find(x=>x.code===code); if(!r)return;
+  const i=watchStocks.findIndex(s=>s.code===code);
+  if(i>=0)watchStocks.splice(i,1); else watchStocks.push({code,name:r.name||code});
+  saveWatch(); renderWatch(); // renderWatch가 이 표도 다시 그린다
+}
+async function loadCondCands(){
+  $("ccStat").textContent="조건 목록 확인 중…";
+  try{
+    const l=await kisFetch("?action=cond");
+    if(l.error){$("ccStat").textContent="실패: "+l.error;return;}
+    condList=l.conds||[];
+    if(!condList.length){$("ccStat").textContent="HTS에 저장된 조건이 없습니다. [0110]에서 저장 후 '사용자조건 서버저장'을 누르세요.";renderCondSel();return;}
+    if(!condList.some(c=>c.seq===condSeq)){
+      const m=condList.find(c=>(c.name||"").includes("마감"))||condList[0];
+      setCondSeq(m.seq);
+    }
+    renderCondSel();
+    $("ccStat").textContent="후보 불러오는 중…";
+    const r=await kisFetch("?action=condResult&seq="+condSeq);
+    if(r.error){$("ccStat").textContent="실패: "+r.error;return;}
+    condRows=r.rows||[];
+    renderCondRows();
+    const nm=(condList.find(c=>c.seq===condSeq)||{}).name||"조건";
+    $("ccStat").textContent=`${nm} · ${condRows.length}종목 · ${new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}`+
+      (condRows.length?"":` · ${r.msg||"조건에 맞는 종목이 없습니다."}`);
+  }catch(e){$("ccStat").textContent="불러오기 실패: "+e.message;}
+}
 
 /* ===== 날짜 바뀜 감지 =====
    탭을 켜둔 채 자정을 넘기면 "오늘"이 어제에 머문다. 화면을 켜둔 채로도 날이 바뀌게 한다.
