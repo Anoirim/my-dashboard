@@ -402,6 +402,30 @@
       </div>
     </div>
 
+    <!-- 시초가 30분 판정 -->
+    <div class="card full" data-dept="research">
+      <h2><span class="dot" style="background:#33d69f"></span>시초가 30분 판정
+        <span id="opStat" style="margin-left:auto;font-size:13px;color:var(--muted);font-weight:500"></span></h2>
+      <div class="row" style="margin-bottom:10px">
+        <input type="text" id="opCode" placeholder="관심종목 코드 6자리 (예: 005930)" style="flex:1" onkeydown="if(event.key==='Enter')addWatch()">
+        <button class="ghost" onclick="addWatch()">관심종목 추가</button>
+      </div>
+      <div id="opWatch" class="row" style="margin-bottom:12px"></div>
+      <div class="row" style="margin-bottom:12px;align-items:center">
+        <input type="date" id="opDate" title="오늘이 기본입니다. 지난 날을 고르면 그날을 다시 판정합니다(약 1년 전까지).">
+        <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px">변동 없음 기준
+          <input type="number" id="opFlat" min="0.1" step="0.1" style="width:72px" onchange="setOpFlat(this.value)"
+            title="30분 동안 고가와 저가 차이가 시초가의 이 비율보다 작으면 '변동 없음'으로 봅니다.">%</label>
+        <button onclick="judgeOpen()">판정</button>
+      </div>
+      <div id="opList"></div>
+      <div class="hint" style="margin-top:8px">
+        09:00~09:30 1분봉으로 노션 메모 "주식으로 돈 버는 사람들의 7대 핵심 기술" 1~5번을 적용합니다.
+        시초가 = 09:00 봉 시가, 이탈·돌파는 09:30 가격으로 판정합니다. 30분 중간에 고점을 찍고 내려왔으면 "상승 후 하락", 중간에 저점을 찍고 올라왔으면 "하락 후 반등"입니다.
+        참고용 규칙이며 매매 판단은 직접 하세요.
+      </div>
+    </div>
+
     <!-- 손절 후 재매수 계산 -->
     <div class="card full" data-dept="research">
       <h2><span class="dot" style="background:#f5a623"></span>손절 후 재매수 계산</h2>
@@ -681,11 +705,13 @@ function reloadAll(){
   pickupTime=localStorage.getItem("pickupTime")||PICKUP_DEFAULT;
   pickupSkips=JSON.parse(localStorage.getItem("pickupSkips")||"[]");
   pickupAlarm=localStorage.getItem("pickupAlarm")!=="off";
+  watchStocks=JSON.parse(localStorage.getItem("watchStocks")||"[]");
+  opFlatPct=+localStorage.getItem("opFlatPct")||1;
   eyeWaitSec=+localStorage.getItem("eyeWaitSec")||EYE_WAIT_DEFAULT;
   eyeGapSec=+localStorage.getItem("eyeGapSec")||EYE_GAP_DEFAULT;
   eyeAutoTimer=localStorage.getItem("eyeAutoTimer")!=="off";
   renderScheds();renderEye();renderCashFlows();loadMonth(curMonth);
-  renderFoods();renderPickup();renderEyeTimerCfg();
+  renderFoods();renderPickup();renderEyeTimerCfg();renderWatch();
   // 보유종목은 잔고를 다시 받아야 하므로, 이미 받아둔 값이 있을 때만 다시 그린다
   if(typeof lastHoldings!=="undefined"&&lastHoldings.length)showHoldings(lastHoldings);
 }
@@ -3722,6 +3748,126 @@ function renderMarketCal(){
 }
 renderMarketCal();
 
+/* ===== 시초가 30분 판정 =====
+   노션 "주식으로 돈 버는 사람들의 7대 핵심 기술" 1~5번을 09:00~09:30 1분봉(action=minute)에 적용한다.
+   - 시초가 = 09:00 봉 시가. 이탈·돌파는 09:30 가격(마지막 봉 종가)으로 본다(2026-11-18 사용자 결정:
+     한 틱만 스쳐도 판정이 뒤집히는 고가·저가 기준보다 덜 흔들린다)
+   - 30분 중간에 고점을 찍고 내려왔으면 "상승 후 하락"(2·3번), 중간에 저점을 찍고 올라왔으면 "하락 후 반등"(4·5번)
+   - 고가·저가 차이가 시초가의 opFlatPct% 미만이면 1번(변동 없음). 기본 1% */
+const OP_RULES={
+  1:{sig:"flat",label:"⚪ 큰 움직임 없음",txt:"장 시작 후 30분 동안 변동이 없으면, 당일 큰 움직임이 나올 가능성은 낮다."},
+  2:{sig:"no",  label:"🔴 매수 금지",     txt:"30분 내 상승 후 하락하고, 시초가를 하향 이탈하면 매수 금지."},
+  3:{sig:"up",  label:"🟢 상승 가능",     txt:"30분 내 상승 후 하락하되, 시초가를 이탈하지 않으면 이후 상승 가능성 높음."},
+  4:{sig:"no",  label:"🔴 매수 금지",     txt:"30분 내 하락 후 반등했지만, 시초가를 넘지 못하면 매수 금지."},
+  5:{sig:"up2", label:"🟢🟢 강한 상승 가능",txt:"30분 내 하락 후 반등하여 시초가를 돌파하면 이후 강한 상승 가능."},
+};
+const OP_COLOR={flat:"var(--muted)",no:"var(--danger)",up:"var(--accent2)",up2:"var(--accent2)"};
+let watchStocks=JSON.parse(localStorage.getItem("watchStocks")||"[]"); // [{code,name}]
+let opFlatPct=+localStorage.getItem("opFlatPct")||1;
+let opBusy=false;
+$("opDate").value=new Date().toLocaleDateString("sv-SE");
+
+function saveWatch(){
+  localStorage.setItem("watchStocks",JSON.stringify(watchStocks));
+  autoSaveFile();
+}
+function setOpFlat(v){
+  const n=+v;
+  if(!(n>0)){$("opFlat").value=opFlatPct;return;}
+  opFlatPct=n; localStorage.setItem("opFlatPct",String(n)); autoSaveFile();
+}
+function renderWatch(){
+  $("opFlat").value=opFlatPct;
+  $("opWatch").innerHTML=watchStocks.map((s,i)=>
+    `<span class="mk-tag" style="display:inline-flex;align-items:center;gap:4px">${esc(s.name||s.code)} <small style="opacity:.7">${s.code}</small>
+      <button class="del" style="padding:0 2px" title="관심종목에서 빼기" onclick="delWatch(${i})">×</button></span>`
+  ).join("")||'<span class="hint" style="margin:0">관심종목을 추가하세요.</span>';
+}
+// 종목명을 받아 오면서 코드가 맞는지도 확인한다(틀린 코드를 목록에 남기지 않음)
+async function addWatch(){
+  const code=$("opCode").value.trim().toUpperCase();
+  if(!/^[0-9A-Z]{6}$/.test(code)){$("opStat").textContent="6자리 종목코드를 입력하세요.";return;}
+  if(watchStocks.some(s=>s.code===code)){$("opStat").textContent="이미 있는 종목입니다.";return;}
+  $("opStat").textContent="종목 확인 중…";
+  const j=await kisFetch("?action=quote&symbol="+code);
+  if(j.error){$("opStat").textContent="추가 실패: "+j.error;return;}
+  watchStocks.push({code,name:j.name||code});
+  saveWatch(); renderWatch();
+  $("opCode").value=""; $("opStat").textContent="";
+}
+function delWatch(i){
+  watchStocks.splice(i,1);
+  saveWatch(); renderWatch();
+}
+// 1분봉(과거→최신)을 받아 판정 결과를 돌려준다. 09:30 봉이 아직 없으면 rule 없이 ready:false
+function opJudge(cs,flatPct){
+  const win=cs.filter(c=>c.time>="090000"&&c.time<="093000");
+  if(!win.length)return null;
+  const o=win[0].open, end=win.length-1, last=win[end];
+  let hiI=0, loI=0;
+  win.forEach((c,i)=>{if(c.high>win[hiI].high)hiI=i; if(c.low<win[loI].low)loI=i;});
+  const hi=win[hiI], lo=win[loI];
+  const r={o,hi:hi.high,hiT:hi.time,lo:lo.low,loT:lo.time,last:last.close,lastT:last.time,
+    range:(hi.high-lo.low)/o*100, ready:last.time>="093000"};
+  if(!r.ready)return r;
+  if(r.range<flatPct){r.rule=1;return r;}
+  // 방향은 30분 "중간에 꺾인 곳"으로 정한다. 고가·저가가 첫 봉(시초가)이나 마지막 봉(09:30)에 있으면 꺾인 곳이 아니다.
+  // "먼저 나온 극값"으로 정하면 시초가 자체가 저가인 날(올랐다 시초가 위에서 멈춤)을 하락 후 반등으로 거꾸로 본다
+  const inner=i=>i>0&&i<end;
+  let upFirst; // true = 상승 후 하락(2·3번), false = 하락 후 반등(4·5번)
+  if(inner(hiI)&&inner(loI))
+    upFirst=hiI===loI?hi.close<hi.open  // 한 봉 안에 둘 다 있으면 그 봉이 음봉일 때 올랐다 내린 것으로 본다
+      :hiI>loI;                          // 두 번 꺾였으면 나중에 꺾인 쪽이 마지막 흐름
+  else if(inner(hiI))upFirst=true;
+  else if(inner(loI))upFirst=false;
+  else upFirst=r.last<o; // 꺾임 없이 곧장 내리면 2번(매수 금지), 곧장 오르면 5번
+  if(upFirst)r.rule=r.last<o?2:3;
+  else r.rule=r.last<=o?4:5;
+  return r;
+}
+function opRowHtml(s,res){
+  const head=`<span class="nm">${esc(s.name||s.code)} <small style="color:var(--muted)">${s.code}</small></span>`;
+  if(res.err)return `<div class="mk-item">${head}<span class="why" style="color:var(--danger)">${esc(res.err)}</span></div>`;
+  const r=res.r;
+  if(!r)return `<div class="mk-item">${head}<span class="why">그날 09:00~09:30 분봉이 없습니다(휴장일이거나 장 시작 전).</span></div>`;
+  const hm=t=>t.slice(0,2)+":"+t.slice(2,4);
+  const pct=(r.last-r.o)/r.o*100;
+  const facts=`시초가 ${won(r.o)} · 고가 ${won(r.hi)}(${hm(r.hiT)}) · 저가 ${won(r.lo)}(${hm(r.loT)}) · `+
+    `${hm(r.lastT)} ${won(r.last)} <span class="${pct>=0?"up":"down"}">(${pct>=0?"+":""}${pct.toFixed(2)}%)</span> · 30분 폭 ${r.range.toFixed(2)}%`;
+  if(!r.ready)return `<div class="mk-item">${head}<span class="mk-tag">대기</span>
+    <span class="dd">09:30 이후 판정</span><span class="why">${facts}</span></div>`;
+  const rule=OP_RULES[r.rule], col=OP_COLOR[rule.sig];
+  return `<div class="mk-item" style="border-color:${col}">${head}
+    <span class="mk-tag" style="color:${col};background:transparent;border:1px solid ${col}">${rule.label}</span>
+    <span class="dd" style="color:${col}">규칙 ${r.rule}</span>
+    <span class="why">${facts}<br>${rule.txt}</span></div>`;
+}
+async function judgeOpen(){
+  if(opBusy)return;
+  if(!watchStocks.length){$("opStat").textContent="관심종목을 먼저 추가하세요.";return;}
+  const date=($("opDate").value||new Date().toLocaleDateString("sv-SE")).replace(/-/g,"");
+  opBusy=true;
+  const rows=watchStocks.map(s=>`<div class="mk-item"><span class="nm">${esc(s.name||s.code)}</span><span class="why">불러오는 중…</span></div>`);
+  $("opList").innerHTML=rows.join("");
+  const list=watchStocks.slice(); // 판정 중에 목록을 고쳐도 줄이 어긋나지 않게
+  try{
+    for(let i=0;i<list.length;i++){
+      const s=list[i];
+      $("opStat").textContent=`${list.length}개 중 ${i+1}개 확인 중…`;
+      if(i>0)await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
+      let res;
+      try{
+        const j=await kisFetch(`?action=minute&symbol=${s.code}&date=${date}&hour=093000&count=31`);
+        res=j.error?{err:j.error}:{r:opJudge(j.candles||[],opFlatPct)};
+      }catch(e){res={err:"불러오기 실패: "+e.message};}
+      rows[i]=opRowHtml(s,res);
+      $("opList").innerHTML=rows.join("");
+    }
+    $("opStat").textContent=`${date.slice(4,6)}/${date.slice(6)} 판정 완료`;
+  }finally{opBusy=false;}
+}
+renderWatch();
+
 /* ===== 날짜 바뀜 감지 =====
    탭을 켜둔 채 자정을 넘기면 "오늘"이 어제에 머문다. 화면을 켜둔 채로도 날이 바뀌게 한다.
    백그라운드 탭에서는 타이머가 느려지거나 멈추므로 탭이 다시 보일 때도 확인한다. */
@@ -3734,6 +3880,7 @@ function applyNewDay(prev){
   // 일부러 다른 날·다른 달을 보고 있었다면 그대로 둔다. 어제(=직전의 오늘)를 보던 경우만 따라 옮긴다
   if(eyeSel===prev)eyeSel=today;
   if($("schedDate").value===prev)$("schedDate").value=today;
+  if($("opDate").value===prev)$("opDate").value=today; // 시초가 판정도 어제를 보던 경우만 오늘로
   if(mkYmd(eyeCur).slice(0,7)===prev.slice(0,7))eyeCur=firstOfThisMonth();
 
   renderEye();renderFoods();renderMarketCal();renderPickup();

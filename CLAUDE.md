@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 탭 (`data-dept`) | 카드 |
 |---|---|
 | 총무부 (`general`) | 타이머, 하원 일정, 스케줄러, 안약 복용(달력 — 일정·결제일·근무 함께 표시), 식품 재고 |
-| 투자연구소 (`research`) | 시장 일정, 손절 후 재매수 계산, 주식 분석 |
+| 투자연구소 (`research`) | 시장 일정, 시초가 30분 판정, 손절 후 재매수 계산, 주식 분석 |
 | 재무부 (`fin`) | 내 계좌 현황(체결 조회·실현손익·보유종목·자산 추이), 목표 현금 만들기, 입출금·배당 기록 |
 | 관리부 (`mgmt`) | 월 지출 관리 |
 
@@ -73,6 +73,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `realizedHist` | 일별 실현손익 보존본(KIS가 3개월 지난 행의 세금을 0으로 주기 때문) |
 | `cashFlows` | 입출금·배당 기록 |
 | `equitySnap` | 자산 추이 오늘 스냅샷 |
+| `watchStocks`, `opFlatPct` | 시초가 30분 판정의 관심종목 `[{code, name}]`, "변동 없음" 기준 %(기본 1) |
 | `curDept` | 선택한 부서 탭 |
 | `dashToken`, `finnhubKey` | 프록시 접근 토큰, Finnhub API 키 |
 
@@ -147,6 +148,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `setTimer`·`setTimerCustom`·`resetTimer`는 `eyeChain`을 비운다 — 안약과 무관하게 타이머를 쓰면 간격이 따라붙지 않게 한다
 - 타이머 재사용은 `runTimer(secs)`(= `pauseTimer` → 시간 설정 → `startTimer`)로 한 곳에 모았다. 중복 `setInterval`이 생기지 않는다
 
+### 시초가 30분 판정 (`/* ===== 시초가 30분 판정 ===== */`)
+
+노션 메모 "주식으로 돈 버는 사람들의 7대 핵심 기술" 1~5번을 관심종목의 09:00~09:30 1분봉(`action=minute`)에 적용한다. 판정은 `opJudge(candles, flatPct)` 한 곳.
+
+- 시초가 = 09:00 봉 시가. 이탈·돌파는 09:30 가격(마지막 봉 종가)으로 본다(사용자 결정 — 고가·저가로 보면 한 틱만 스쳐도 뒤집힌다)
+- 방향은 **30분 중간에 꺾인 곳**으로 정한다. "고가·저가 중 먼저 나온 쪽"으로 정하면 시초가 자체가 저가인 날(올랐다가 시초가 위에서 멈춤)을 하락 후 반등으로 거꾸로 본다
+- 판정 버튼 방식이다(09:30 자동 판정 없음). 지난 날짜도 고를 수 있다(분봉 약 1년 보관)
+
 ### 보유종목 표 (`renderHoldings`)
 
 - 가격 칸은 한 칸에 3단: 매입가 (본전가) / 현재가 (증감/손익률) / 목표가 (+X%). 평가금액 칸은 2단: 매입금 / 평가금액 (평가손익)
@@ -165,6 +174,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `price`(기본, `?symbol=`) → `getFull()`: 현재가+종목명+일봉+재무/ETF를 **토큰 1개로 한 번에** 반환. 주식 분석 조회용
 - `quote` → 경량 현재가. 실시간 폴링용
 - `daily` / `finance` → 개별 조회
+- `minute` → 1분봉(`date` YYYYMMDD 기본 오늘, `hour` HHMMSS 기본 093000, `count` 기본 31·최대 120). 주식일별분봉조회 `FHKST03010230` 1회 호출, **실전계좌 전용**(mock이면 안내 문구). 칸 이름은 공식 문서에 없어 2026-11-18 실측으로 확정. 과거 데이터 포함이라 전날 봉이 섞여 와서 요청 날짜만 남긴다
 - `balance` → 계좌 전체 잔고 통합. 종목코드 불필요
 - `trades` → 기간 체결내역(`from`/`to`, 기본 3개월). 오래된 기간은 tr_id가 다르다(`tradeTrId`)
 - `realized` → 기간별 일별 실현손익(기본 6개월)

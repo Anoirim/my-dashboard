@@ -132,15 +132,9 @@ async function getDaily(symbol, from, to) {
 // 당일 날짜를 넣으면 당일 데이터도 나와 TR 하나로 통일할 수 있다.
 // hour(HHMMSS)를 기준으로 그 시각까지의 과거 분봉을 최신→과거 순으로 돌려주므로 뒤집어 과거→최신으로 맞춘다.
 // 주의: 이 TR은 실전계좌 전용이라 KIS_ENV=mock에서는 쓸 수 없다.
-const MIN_F = {
-  date: ["stck_bsop_date", "bsop_date"],
-  time: ["stck_cntg_hour", "cntg_hour", "stck_cntg_hour_1"],
-  open: ["stck_oprc", "oprc"],
-  high: ["stck_hgpr", "hgpr"],
-  low: ["stck_lwpr", "lwpr"],
-  close: ["stck_prpr", "stck_clpr", "prpr"],
-  vol: ["cntg_vol", "acml_vol", "evss_vol"],
-};
+// output2 필드명은 공식 문서에 없어 2026-11-18 배포본 실측으로 확정했다
+// (stck_prpr = 그 1분의 종가, cntg_vol = 그 1분의 거래량).
+// 과거 데이터 포함(Y)이라 요청 시각이 이르면 전날 봉까지 섞여 오므로 요청 날짜만 남긴다.
 async function getMinutes(symbol, date, hour, count) {
   if (IS_MOCK)
     return { error: "분봉 조회(FHKST03010230)는 실전계좌 전용입니다. KIS_ENV=mock에서는 쓸 수 없습니다.", candles: [] };
@@ -152,28 +146,18 @@ async function getMinutes(symbol, date, hour, count) {
     "&FID_PW_DATA_INCU_YN=Y&FID_FAKE_TICK_INCU_YN=N";
   const j = await (await fetch(url, { headers: headers(token, "FHKST03010230") })).json();
   const rows = j.output2 || [];
-  const rawKeys = rows.length ? Object.keys(rows[0]) : null;
-  const o1 = j.output1 || {};
-  const candles = [];
-  rows.forEach((x) => {
-    const t = pick(x, MIN_F.time), c = num(pick(x, MIN_F.close));
-    if (!t || !c) return;
-    candles.push({
-      date: String(pick(x, MIN_F.date) || date),
-      time: String(t).padStart(6, "0"),
-      open: num(pick(x, MIN_F.open)), high: num(pick(x, MIN_F.high)),
-      low: num(pick(x, MIN_F.low)), close: c, vol: num(pick(x, MIN_F.vol)),
-    });
-  });
-  candles.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1)); // 과거→최신
+  const candles = rows
+    .filter((x) => x.stck_bsop_date === date && x.stck_cntg_hour && x.stck_prpr)
+    .map((x) => ({
+      time: String(x.stck_cntg_hour).padStart(6, "0"),
+      open: num(x.stck_oprc), high: num(x.stck_hgpr), low: num(x.stck_lwpr),
+      close: num(x.stck_prpr), vol: num(x.cntg_vol),
+    }))
+    .sort((a, b) => (a.time < b.time ? -1 : 1)); // 과거→최신
   return {
-    name: o1.hts_kor_isnm || o1.prdt_name || null,
     date, hour,
-    prevClose: num(pick(o1, ["stck_prdy_clpr", "prdy_clpr"])),
     candles: candles.slice(-count),
-    rawKeys,
-    rawSample: rows[0] || null, // 필드명을 실측으로 확정하기 위한 원본 1행(debug action은 삭제됨)
-    msg: rows.length ? null : (j.msg1 || null),
+    msg: candles.length ? null : (j.msg1 || "그날 분봉이 없습니다."),
   };
 }
 
