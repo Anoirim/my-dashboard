@@ -4117,14 +4117,15 @@ async function runBacktest(){
         $("btStat").textContent=`종목 ${si+1}/${list.length} · ${k+1}/${idx.length}일 · 새로 받음 ${fetched}`;
         let mins=null;
         try{mins=await idbGet(key);}catch(e){}
-        if(!mins){
+        // 빈 기록은 믿지 않고 다시 받는다. 2026-11-19 전에는 KIS 일시 오류를 빈 분봉으로 저장해 그날이 영영 빠졌다
+        if(!mins||!mins.length){
           await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
           try{
             const j=await kisFetch(`?action=minute&symbol=${s.code}&date=${date}&hour=093000&count=31`);
             if(j.error){failed++;continue;}
             mins=j.candles||[];
             fetched++;
-            try{await idbSet(key,mins);}catch(e){} // 저장 실패해도 계산은 계속
+            if(mins.length){try{await idbSet(key,mins);}catch(e){}} // 봉이 있는 날만 저장. 저장 실패해도 계산은 계속
           }catch(e){failed++;continue;}
         }
         const d=btDay(mins,cs[i].close,closes.slice(0,i),s.name);

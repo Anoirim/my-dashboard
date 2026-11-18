@@ -145,7 +145,17 @@ async function getMinutes(symbol, date, hour, count) {
     "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol +
     "&FID_INPUT_DATE_1=" + date + "&FID_INPUT_HOUR_1=" + hour +
     "&FID_PW_DATA_INCU_YN=Y&FID_FAKE_TICK_INCU_YN=N";
-  const j = await (await fetch(url, { headers: headers(token, "FHKST03010230") })).json();
+  // KIS가 0.6초 간격으로 불러도 가끔 "호출 후처리(MCI전송) 오류"(rt_cd≠"0")를 준다(2026-11-19 실측, 6일 중 2일).
+  // 실패를 빈 분봉으로 넘기면 화면은 "분봉 없음"으로 속고 백테스트는 빈 날을 저장해 버리므로,
+  // 0.5초·1초 쉬고 두 번 더 부르고, 그래도 실패면 error로 돌려준다
+  let j = null;
+  for (let t = 0; t < 3; t++) {
+    if (t) await sleep(500 * t);
+    j = await (await fetch(url, { headers: headers(token, "FHKST03010230") })).json();
+    if (j.rt_cd === "0") break;
+  }
+  if (j.rt_cd !== "0")
+    return { error: "KIS 일시 오류(3번 시도): " + (j.msg1 || "응답 실패") + " 잠시 뒤 다시 눌러 보세요.", kisFail: true, date, hour, candles: [] };
   const rows = j.output2 || [];
   const candles = rows
     .filter((x) => x.stck_bsop_date === date && x.stck_cntg_hour && x.stck_prpr)
@@ -158,7 +168,7 @@ async function getMinutes(symbol, date, hour, count) {
   return {
     date, hour,
     candles: candles.slice(-count),
-    msg: candles.length ? null : (j.msg1 || "그날 분봉이 없습니다."),
+    msg: candles.length ? null : "그날 분봉이 없습니다.", // KIS는 정상 응답(rt_cd "0")에 봉만 없는 경우 = 휴장일·장 시작 전
   };
 }
 
