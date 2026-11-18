@@ -449,6 +449,7 @@
       <div class="hint" style="margin-top:8px">
         09:00~09:30 1분봉으로 노션 메모 "주식으로 돈 버는 사람들의 7대 핵심 기술" 1~5번을 적용합니다.
         시초가 = 09:00 봉 시가, 이탈·돌파는 09:30 가격으로 판정합니다. 30분 중간에 고점을 찍고 내려왔으면 "상승 후 하락", 중간에 저점을 찍고 올라왔으면 "하락 후 반등"입니다.
+        7번(장기 하락 추세)은 일봉으로 따로 봅니다: 가격이 60일 평균보다 아래이고 그 평균도 20거래일 전보다 내려가는 중이면 "⚠ 7번 접근 금지"를 붙입니다.
         참고용 규칙이며 매매 판단은 직접 하세요.
       </div>
     </div>
@@ -2287,13 +2288,30 @@ function drawDailyKR(candles,name,avg,bep){
         x:{ticks:{color:"#8b97ad",maxTicksLimit:8},grid:{display:false}}}}
   });
 }
+// 노션 "7대 핵심 기술" 7번(장기 하락 추세 접근 금지)의 숫자 기준(2026-11-19 사용자 결정):
+// 현재가 < 60일 평균(60일선) 그리고 60일선 < 20거래일 전의 60일선 → 장기 하락.
+// 하나만 보면 일시적인 눌림까지 걸린다. closes는 과거→최신 종가, 80개 미만이면 판단하지 않는다(null).
+// 시초가 판정과 주식 분석의 쉬운 해석이 같이 쓴다
+function longDownTrend(closes,price){
+  const n=closes.length;
+  if(n<80)return null;
+  const ma60=end=>{let s=0;for(let i=end-60;i<end;i++)s+=closes[i];return s/60;};
+  const now=ma60(n), prev=ma60(n-20), p=price!=null?price:closes[n-1];
+  return {down:p<now&&now<prev, price:p, ma60:now, ma60prev:prev};
+}
 function renderEasyKR(d,up){
   const won=n=>Math.round(n).toLocaleString("ko-KR")+"원";
   const range=d.high-d.low, pos=range>0?((d.price-d.low)/range*100):50;
   let ov=`오늘 <b>${d.name}</b>은(는) 전일보다 <b>${up?"올랐어요 ▲":"내렸어요 ▼"}</b> (${d.rate}%). `;
   ov+= pos>66?"장중 <b>높은 쪽</b>(강세).":pos<33?"장중 <b>낮은 쪽</b>(약세).":"장중 <b>가운데쯤</b>.";
+  const tr=longDownTrend((d.candles||[]).map(c=>c.close),d.price);
+  if(tr&&tr.down)ov+=`<br><b style="color:var(--danger)">⚠ 장기 하락 추세예요.</b> 바닥을 예단하지 말고 접근하지 마세요(7대 기술 7번).`;
   $("easyOverall").innerHTML=ov;
   const rows=[]; const add=(k,v,rel,n)=>rows.push({k,v,rel,n});
+  if(tr)add("장기 추세",tr.down?'<span style="color:var(--danger)">하락 추세</span>':"하락 아님","mid",
+    `60일 평균 가격 ${won(tr.ma60)} (20거래일 전 ${won(tr.ma60prev)}). `+
+    (tr.down?"지금 가격이 평균보다 아래이고 평균도 내려가는 중이에요.":
+      tr.price<tr.ma60?"평균보다 아래지만 평균은 내려가지 않아 일시적인 눌림일 수 있어요.":"지금 가격이 평균보다 위예요."));
   const volPct=d.prevClose>0?(range/d.prevClose*100):0;
   add("오늘 변동폭",won(range),"low",`하루 고가-저가 차이. 전일가의 ${volPct.toFixed(1)}% ${volPct>4?"→ 꽤 출렁였어요.":"→ 잔잔했어요."}`);
 
@@ -3859,22 +3877,34 @@ function opJudge(cs,flatPct){
   else r.rule=r.last<=o?4:5;
   return r;
 }
+// 7번(장기 하락) 한 줄. trend: undefined(조회 안 함) / {err} / null(일봉 부족) / longDownTrend 결과
+function opTrendHtml(t){
+  if(t===undefined)return "";
+  const w=n=>Math.round(n).toLocaleString("ko-KR")+"원";
+  if(t===null)return `<br><span style="color:var(--muted)">7번: 일봉이 80거래일보다 적어 장기 추세는 판단하지 않았습니다.</span>`;
+  if(t.err)return `<br><span style="color:var(--muted)">7번: 일봉을 받지 못해 장기 추세를 확인하지 못했습니다(${esc(t.err)}).</span>`;
+  if(t.down)return `<br><b style="color:var(--danger)">⚠ 7번 장기 하락 추세 — 접근 금지.</b> `+
+    `가격 ${w(t.price)}이 60일선 ${w(t.ma60)}보다 아래이고, 60일선도 20거래일 전(${w(t.ma60prev)})보다 내려가는 중입니다. 바닥을 예단하지 마세요.`;
+  return `<br><span style="color:var(--muted)">7번: 장기 하락 추세 아님 (60일선 ${w(t.ma60)}, 20거래일 전 ${w(t.ma60prev)})</span>`;
+}
 function opRowHtml(s,res){
+  const t7=opTrendHtml(res.trend);
+  const tag7=res.trend&&res.trend.down?'<span class="mk-tag" style="color:var(--danger);background:transparent;border:1px solid var(--danger)">⚠ 7번 접근 금지</span>':"";
   const head=`<span class="nm"><span class="hold-link" title="주식 분석에서 조회" onclick="analyzeHolding('${s.code}')">${esc(s.name||s.code)}</span> <small style="color:var(--muted)">${s.code}</small></span>`;
-  if(res.err)return `<div class="mk-item">${head}<span class="why" style="color:var(--danger)">${esc(res.err)}</span></div>`;
+  if(res.err)return `<div class="mk-item">${head}${tag7}<span class="why"><span style="color:var(--danger)">${esc(res.err)}</span>${t7}</span></div>`;
   const r=res.r;
-  if(!r)return `<div class="mk-item">${head}<span class="why">그날 09:00~09:30 분봉이 없습니다(휴장일이거나 장 시작 전).</span></div>`;
+  if(!r)return `<div class="mk-item">${head}${tag7}<span class="why">그날 09:00~09:30 분봉이 없습니다(휴장일이거나 장 시작 전).${t7}</span></div>`;
   const hm=t=>t.slice(0,2)+":"+t.slice(2,4);
   const pct=(r.last-r.o)/r.o*100;
   const facts=`시초가 ${won(r.o)} · 고가 ${won(r.hi)}(${hm(r.hiT)}) · 저가 ${won(r.lo)}(${hm(r.loT)}) · `+
     `${hm(r.lastT)} ${won(r.last)} <span class="${pct>=0?"up":"down"}">(${pct>=0?"+":""}${pct.toFixed(2)}%)</span> · 30분 폭 ${r.range.toFixed(2)}%`;
-  if(!r.ready)return `<div class="mk-item">${head}<span class="mk-tag">대기</span>
-    <span class="dd">09:30 이후 판정</span><span class="why">${facts}</span></div>`;
+  if(!r.ready)return `<div class="mk-item">${head}<span class="mk-tag">대기</span>${tag7}
+    <span class="dd">09:30 이후 판정</span><span class="why">${facts}${t7}</span></div>`;
   const rule=OP_RULES[r.rule], col=OP_COLOR[rule.sig];
   return `<div class="mk-item" style="border-color:${col}">${head}
-    <span class="mk-tag" style="color:${col};background:transparent;border:1px solid ${col}">${rule.label}</span>
+    <span class="mk-tag" style="color:${col};background:transparent;border:1px solid ${col}">${rule.label}</span>${tag7}
     <span class="dd" style="color:${col}">규칙 ${r.rule}</span>
-    <span class="why">${facts}<br>${rule.txt}</span></div>`;
+    <span class="why">${facts}<br>${rule.txt}${t7}</span></div>`;
 }
 async function judgeOpen(){
   if(opBusy)return;
@@ -3889,21 +3919,25 @@ async function judgeOpen(){
       const s=list[i];
       $("opStat").textContent=`${list.length}개 중 ${i+1}개 확인 중…`;
       if(i>0)await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
-      let res;
+      let res, trend;
       try{
-        // 이름 대신 코드로 저장된 종목(2026-11-18 첫 배포본에서 추가한 것)은 이번에 이름을 채운다
-        if(s.name===s.code){
-          const n=await fetchStockName(s.code);
-          if(n.name){
-            s.name=n.name;
+        // 7번(장기 하락)용 일봉: 판정 날짜까지 6개월(60일선 + 20거래일 전 60일선에 80거래일 필요).
+        // 지난 날을 판정하면 그날 기준 추세가 나온다. 이름 대신 코드로 저장된 종목은 여기서 이름도 채운다
+        const from=new Date(+date.slice(0,4),+date.slice(4,6)-1,+date.slice(6)-183).toLocaleDateString("sv-SE").replace(/-/g,"");
+        const dd=await kisFetch(`?action=daily&symbol=${s.code}&from=${from}&to=${date}`);
+        if(dd.error)trend={err:dd.error};
+        else{
+          trend=longDownTrend((dd.candles||[]).map(c=>c.close));
+          if(s.name===s.code&&dd.name){
+            s.name=dd.name;
             const w=watchStocks.find(x=>x.code===s.code);
-            if(w){w.name=n.name; saveWatch(); renderWatch();}
+            if(w){w.name=dd.name; saveWatch(); renderWatch();}
           }
-          await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
         }
+        await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
         const j=await kisFetch(`?action=minute&symbol=${s.code}&date=${date}&hour=093000&count=31`);
-        res=j.error?{err:j.error}:{r:opJudge(j.candles||[],opFlatPct)};
-      }catch(e){res={err:"불러오기 실패: "+e.message};}
+        res=j.error?{err:j.error,trend}:{r:opJudge(j.candles||[],opFlatPct),trend};
+      }catch(e){res={err:"불러오기 실패: "+e.message,trend};}
       rows[i]=opRowHtml(s,res);
       $("opList").innerHTML=rows.join("");
     }
