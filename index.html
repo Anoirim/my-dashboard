@@ -452,6 +452,24 @@
         7번(장기 하락 추세)은 일봉으로 따로 봅니다: 가격이 60일 평균보다 아래이고 그 평균도 20거래일 전보다 내려가는 중이면 "⚠ 7번 접근 금지"를 붙입니다.
         참고용 규칙이며 매매 판단은 직접 하세요.
       </div>
+      <details class="fd-sec" id="btBox">
+        <summary>과거 검증 (백테스트) — 이 규칙이 실제로 맞았나</summary>
+        <div class="row" style="margin:8px 0;align-items:center">
+          <select id="btPeriod" title="관심종목 전체를 이 기간 동안 날마다 판정해 봅니다">
+            <option value="1">최근 1개월</option><option value="3" selected>최근 3개월</option>
+            <option value="6">최근 6개월</option><option value="12">최근 1년</option>
+          </select>
+          <button onclick="runBacktest()">검증 실행</button>
+          <button class="ghost" onclick="stopBacktest()">중지</button>
+          <span id="btStat" class="hint" style="margin:0"></span>
+        </div>
+        <div id="btOut"></div>
+        <div class="hint">
+          날마다 09:30에 샀다고 치고 그날 종가에 판 수익률(수수료 0.015%·거래세 0.2% 차감)을 규칙별로 모읍니다. "모든 날"과 비교해야 규칙의 효과가 보입니다.
+          한 번 받은 날은 이 브라우저에 저장해 다시 실행하면 새 날짜만 받습니다. 종목 수 × 거래일만큼 조회해서(5종목 3개월 약 1분 30초) 시간이 걸립니다.
+          09:30 가격에 정확히 샀다고 가정한 계산이며, 표본이 적으면(30건 미만) 우연이 섞입니다.
+        </div>
+      </details>
     </div>
 
     <!-- 마감 전 후보 (7대 기술 6번) -->
@@ -3965,6 +3983,105 @@ async function judgeOpen(){
   }finally{opBusy=false;}
 }
 renderWatch();
+
+/* ===== 시초가 판정 백테스트 (과거 검증) =====
+   관심종목을 기간 동안 날마다 opJudge로 판정하고, 09:30에 사서 그날 종가에 판 수익률을 규칙별로 모은다(2026-11-19 사용자 결정).
+   - 판정은 화면과 같은 opJudge·opFlatPct를 쓴다. 판정 로직을 두 벌로 만들지 않는다
+   - 거래일·종가는 종목마다 일봉 1회. 분봉은 거래일마다 1회라 IndexedDB(dashDB "h")에 bt_<코드>_<날짜>로 분봉을 저장해
+     다시 실행하면 새 날짜만 받는다. 분봉을 저장하고 판정은 매번 하므로 "변동 없음" 기준을 바꿔도 캐시가 틀어지지 않는다
+   - 오늘은 장이 안 끝났을 수 있어 넣지 않는다
+   - 7번(장기 하락)은 그날 이전 종가까지만으로 계산(미래 정보 차단), 가격은 09:30 가격
+   - 수익률 = (종가 − 매도 비용 − (09:30가 + 매수 비용)) ÷ (09:30가 + 매수 비용). 비용은 tradeCost(기본 수수료, ETF 거래세 면제) */
+const BT_MIN_N=30; // 이보다 적은 칸은 "표본 적음"
+let btStop=false, btBusy=false;
+function stopBacktest(){btStop=true;}
+// 하루치: 분봉 + 그날 종가 + 그 전날까지 종가 → 판정·수익률. 판정 불가면 null
+function btDay(cs,close,prevCloses,name){
+  const r=opJudge(cs,opFlatPct);
+  if(!r||!r.ready||!(r.last>0)||!(close>0))return null;
+  const buy=r.last+tradeCost(r.last,false,"",name);
+  const sell=close-tradeCost(close,true,"",name);
+  const t=longDownTrend(prevCloses,r.last);
+  return {rule:r.rule, ret:(sell-buy)/buy*100, move:Math.abs(close-r.last)/r.last*100, down7:t?t.down:null};
+}
+function btStats(list){
+  if(!list.length)return null;
+  const rs=list.map(d=>d.ret).sort((a,b)=>a-b), n=rs.length;
+  const mid=n%2?rs[(n-1)/2]:(rs[n/2-1]+rs[n/2])/2;
+  return {n, mean:rs.reduce((s,v)=>s+v,0)/n, median:mid, win:list.filter(d=>d.ret>0).length/n*100,
+    move:list.reduce((s,d)=>s+d.move,0)/n};
+}
+function btRowHtml(label,st,base,note){
+  const pct=v=>`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${v.toFixed(2)}%</span>`;
+  if(!st)return `<tr style="border-top:1px solid var(--border)"><td style="padding:6px;text-align:left">${label}</td><td colspan="6" style="padding:6px;color:var(--muted)">해당 날 없음</td></tr>`;
+  const few=st.n<BT_MIN_N;
+  const diff=base&&base!==st?st.mean-base.mean:null;
+  return `<tr style="border-top:1px solid var(--border);text-align:right;${few?"opacity:.55":""}">
+    <td style="padding:6px;text-align:left">${label}${few?' <small style="color:var(--muted)">표본 적음</small>':""}</td>
+    <td style="padding:6px">${st.n}</td><td style="padding:6px">${pct(st.mean)}</td><td style="padding:6px">${pct(st.median)}</td>
+    <td style="padding:6px">${st.win.toFixed(0)}%</td><td style="padding:6px">${st.move.toFixed(2)}%</td>
+    <td style="padding:6px">${diff==null?"-":pct(diff)}${note?` <small style="color:var(--muted)">${note}</small>`:""}</td></tr>`;
+}
+function renderBacktest(days,info){
+  const all=btStats(days);
+  if(!all){$("btOut").innerHTML='<div class="hint">판정할 수 있는 날이 없습니다.</div>';return;}
+  const by=k=>btStats(days.filter(d=>d.rule===k));
+  const head=`<tr style="color:var(--muted);text-align:right"><th style="padding:6px;text-align:left">구분</th><th style="padding:6px">건수</th>
+    <th style="padding:6px" title="09:30 매수 → 종가 매도, 비용 차감">평균 수익률</th><th style="padding:6px">중앙값</th>
+    <th style="padding:6px" title="수익이 0보다 큰 날의 비율">승률</th><th style="padding:6px" title="09:30 가격에서 종가까지 움직인 크기(절댓값) 평균. 1번은 이 값이 작아야 맞음">이후 움직임</th>
+    <th style="padding:6px" title="이 구분의 평균 수익률 − 모든 날 평균">모든 날 대비</th></tr>`;
+  const rules=[1,2,3,4,5].map(k=>btRowHtml(`${k}번 ${OP_RULES[k].label}`,by(k),all,k===1?"움직임을 보세요":""));
+  const d7=btStats(days.filter(d=>d.down7===true)), n7=btStats(days.filter(d=>d.down7===false));
+  const tbl=(rows)=>`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>`;
+  $("btOut").innerHTML=`<div class="hint" style="margin-top:4px">${info}</div>`+
+    tbl([...rules, btRowHtml("<b>모든 날 (기준선)</b>",all,null)])+
+    `<div class="exp-label" style="margin-top:14px">7번 장기 하락 추세</div>`+
+    tbl([btRowHtml("⚠ 7번 걸린 날",d7,all), btRowHtml("7번 안 걸린 날",n7,all)]);
+}
+async function runBacktest(){
+  if(btBusy)return;
+  if(!watchStocks.length){$("btStat").textContent="관심종목을 먼저 추가하세요.";return;}
+  btBusy=true; btStop=false;
+  const months=+$("btPeriod").value||3;
+  const ymd=d=>d.toLocaleDateString("sv-SE").replace(/-/g,"");
+  const now=new Date(), today=ymd(now);
+  const start=ymd(new Date(now.getFullYear(),now.getMonth()-months,now.getDate()));
+  const from=ymd(new Date(now.getFullYear(),now.getMonth()-months,now.getDate()-183)); // 7번용 60일선+20거래일 여유
+  const list=watchStocks.slice();
+  const days=[]; let fetched=0, failed=0;
+  try{
+    for(let si=0;si<list.length&&!btStop;si++){
+      const s=list[si];
+      $("btStat").textContent=`종목 ${si+1}/${list.length} · 일봉 받는 중…`;
+      const dd=await kisFetch(`?action=daily&symbol=${s.code}&from=${from}&to=${today}`);
+      if(dd.error||!dd.candles){failed++;continue;}
+      const cs=dd.candles, closes=cs.map(c=>c.close);
+      const idx=cs.map((c,i)=>i).filter(i=>cs[i].date>=start&&cs[i].date<today);
+      for(let k=0;k<idx.length&&!btStop;k++){
+        const i=idx[k], date=cs[i].date, key=`bt_${s.code}_${date}`;
+        $("btStat").textContent=`종목 ${si+1}/${list.length} · ${k+1}/${idx.length}일 · 새로 받음 ${fetched}`;
+        let mins=null;
+        try{mins=await idbGet(key);}catch(e){}
+        if(!mins){
+          await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
+          try{
+            const j=await kisFetch(`?action=minute&symbol=${s.code}&date=${date}&hour=093000&count=31`);
+            if(j.error){failed++;continue;}
+            mins=j.candles||[];
+            fetched++;
+            try{await idbSet(key,mins);}catch(e){} // 저장 실패해도 계산은 계속
+          }catch(e){failed++;continue;}
+        }
+        const d=btDay(mins,cs[i].close,closes.slice(0,i),s.name);
+        if(d)days.push(d);
+      }
+    }
+    const info=`관심종목 ${list.length}개 · ${start.slice(0,4)}-${start.slice(4,6)}-${start.slice(6)}부터 · 판정된 날 ${days.length}건`+
+      `${failed?` · 받지 못한 날 ${failed}건`:""}${btStop?" · 중지됨(여기까지 결과)":""} · 변동 없음 기준 ${opFlatPct}%`;
+    renderBacktest(days,info);
+    $("btStat").textContent=btStop?"중지됨":"완료";
+  }finally{btBusy=false;}
+}
 
 /* ===== 마감 전 후보 (7대 기술 6번) =====
    KIS 종목조건검색(action=cond·condResult)으로 HTS [0110]에 저장한 조건의 종목을 받는다.
