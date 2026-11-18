@@ -2,7 +2,7 @@
 // 환경변수: KIS_APPKEY, KIS_APPSECRET  (모의투자면 KIS_ENV=mock 추가), 계좌별 KIS_ACCT{1..4}_*, ECOS_KEY, DASH_TOKEN
 // 호출(?action=):
 //   price(기본, symbol) 현재가+이름+일봉+재무/ETF · quote(symbol) 경량 현재가 · daily(symbol) 일봉 · finance(symbol) 재무비율
-//   minute(symbol, date, hour, count) 1분봉(실전계좌 전용)
+//   minute(symbol, date, hour, count) 1분봉(실전계좌 전용) · rank(market, sort, rate1, rate2) 등락률 순위(실측 중)
 //   balance 잔고 · trades(from,to) 체결내역 · realized(from,to) 일별 실현손익 · index(code) 지수 일봉
 //   macro(stat,item | kind=list/items) 한국은행 ECOS · news(q) 구글 뉴스 RSS
 
@@ -158,6 +158,36 @@ async function getMinutes(symbol, date, hour, count) {
     date, hour,
     candles: candles.slice(-count),
     msg: candles.length ? null : (j.msg1 || "그날 분봉이 없습니다."),
+  };
+}
+
+// 등락률 순위 — 국내주식 등락률 순위 FHPST01700000 (7대 기술 6번 후보 고르기용)
+// 파라미터 이름·기본값은 공식 예제(open-trading-api examples_llm/domestic_stock/fluctuation)를 그대로 따른다.
+// 아직 실측 전: 한 번에 몇 건 오는지, 등락 비율(rsfl_rate1/2)로 서버가 걸러 주는지 확인하려고
+// 응답 원본 칸(rawKeys)과 다음 장 표시(trCont)를 함께 돌려준다.
+async function getRank(market, sort, rate1, rate2) {
+  const token = await getToken();
+  const q = {
+    fid_cond_mrkt_div_code: "J", fid_cond_scr_div_code: "20170", fid_input_iscd: market,
+    fid_rank_sort_cls_code: sort, fid_input_cnt_1: "0", fid_prc_cls_code: "0",
+    fid_input_price_1: "", fid_input_price_2: "", fid_vol_cnt: "",
+    fid_trgt_cls_code: "0", fid_trgt_exls_cls_code: "0", fid_div_cls_code: "0",
+    fid_rsfl_rate1: rate1, fid_rsfl_rate2: rate2,
+  };
+  const url = BASE + "/uapi/domestic-stock/v1/ranking/fluctuation?" + new URLSearchParams(q).toString();
+  const r = await fetch(url, { headers: headers(token, "FHPST01700000") });
+  const j = await r.json();
+  const rows = j.output || j.output1 || [];
+  return {
+    market, sort, rate1, rate2,
+    count: rows.length,
+    trCont: r.headers.get("tr_cont"),
+    rows: rows.map((x) => ({
+      rank: num(x.data_rank), code: x.stck_shrn_iscd, name: x.hts_kor_isnm,
+      price: num(x.stck_prpr), rate: num(x.prdy_ctrt), vol: num(x.acml_vol),
+    })),
+    rawKeys: rows.length ? Object.keys(rows[0]) : null,
+    rtCd: j.rt_cd, msg: j.msg1 || null,
   };
 }
 
@@ -592,6 +622,15 @@ module.exports = async function handler(req, res) {
     if (action === "index") {
       const code = /^\d{4}$/.test(String(req.query.code || "")) ? String(req.query.code) : "0001";
       res.status(200).json(await getIndex(code, String(req.query.from || ""), String(req.query.to || "")));
+      return;
+    }
+
+    // 등락률 순위도 종목코드 불필요. market 0000 전체 / 0001 코스피 / 1001 코스닥, rate1·rate2는 등락 비율 범위(빈 값이면 제한 없음)
+    if (action === "rank") {
+      const mk = /^\d{4}$/.test(String(req.query.market || "")) ? String(req.query.market) : "0000";
+      const sort = /^\d{1,4}$/.test(String(req.query.sort || "")) ? String(req.query.sort) : "0";
+      const rate = (v) => (/^-?\d+(\.\d+)?$/.test(String(v || "")) ? String(v) : "");
+      res.status(200).json(await getRank(mk, sort, rate(req.query.rate1), rate(req.query.rate2)));
       return;
     }
 
