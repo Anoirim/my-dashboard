@@ -2,6 +2,7 @@
 // 환경변수: KIS_APPKEY, KIS_APPSECRET  (모의투자면 KIS_ENV=mock 추가), 계좌별 KIS_ACCT{1..4}_*, ECOS_KEY, DASH_TOKEN
 // 호출(?action=):
 //   price(기본, symbol) 현재가+이름+일봉+재무/ETF · quote(symbol) 경량 현재가 · daily(symbol) 일봉 · finance(symbol) 재무비율
+//   minute(symbol, date, hour, count) 1분봉(실전계좌 전용)
 //   balance 잔고 · trades(from,to) 체결내역 · realized(from,to) 일별 실현손익 · index(code) 지수 일봉
 //   macro(stat,item | kind=list/items) 한국은행 ECOS · news(q) 구글 뉴스 RSS
 
@@ -124,6 +125,56 @@ async function getDaily(symbol, from, to) {
   }
   const candles = Object.keys(map).sort().map((k) => map[k]); // 과거→최근
   return { name, candles };
+}
+
+// 분봉(1분) 조회 — 주식일별분봉조회 FHKST03010230
+// 당일분봉(FHKST03010200)은 1회 30건·당일만이지만, 이 TR은 1회 120건·약 1년을 받으므로
+// 당일 날짜를 넣으면 당일 데이터도 나와 TR 하나로 통일할 수 있다.
+// hour(HHMMSS)를 기준으로 그 시각까지의 과거 분봉을 최신→과거 순으로 돌려주므로 뒤집어 과거→최신으로 맞춘다.
+// 주의: 이 TR은 실전계좌 전용이라 KIS_ENV=mock에서는 쓸 수 없다.
+const MIN_F = {
+  date: ["stck_bsop_date", "bsop_date"],
+  time: ["stck_cntg_hour", "cntg_hour", "stck_cntg_hour_1"],
+  open: ["stck_oprc", "oprc"],
+  high: ["stck_hgpr", "hgpr"],
+  low: ["stck_lwpr", "lwpr"],
+  close: ["stck_prpr", "stck_clpr", "prpr"],
+  vol: ["cntg_vol", "acml_vol", "evss_vol"],
+};
+async function getMinutes(symbol, date, hour, count) {
+  if (IS_MOCK)
+    return { error: "분봉 조회(FHKST03010230)는 실전계좌 전용입니다. KIS_ENV=mock에서는 쓸 수 없습니다.", candles: [] };
+  const token = await getToken();
+  const url =
+    BASE + "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice" +
+    "?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=" + symbol +
+    "&FID_INPUT_DATE_1=" + date + "&FID_INPUT_HOUR_1=" + hour +
+    "&FID_PW_DATA_INCU_YN=Y&FID_FAKE_TICK_INCU_YN=N";
+  const j = await (await fetch(url, { headers: headers(token, "FHKST03010230") })).json();
+  const rows = j.output2 || [];
+  const rawKeys = rows.length ? Object.keys(rows[0]) : null;
+  const o1 = j.output1 || {};
+  const candles = [];
+  rows.forEach((x) => {
+    const t = pick(x, MIN_F.time), c = num(pick(x, MIN_F.close));
+    if (!t || !c) return;
+    candles.push({
+      date: String(pick(x, MIN_F.date) || date),
+      time: String(t).padStart(6, "0"),
+      open: num(pick(x, MIN_F.open)), high: num(pick(x, MIN_F.high)),
+      low: num(pick(x, MIN_F.low)), close: c, vol: num(pick(x, MIN_F.vol)),
+    });
+  });
+  candles.sort((a, b) => (a.date + a.time < b.date + b.time ? -1 : 1)); // 과거→최신
+  return {
+    name: o1.hts_kor_isnm || o1.prdt_name || null,
+    date, hour,
+    prevClose: num(pick(o1, ["stck_prdy_clpr", "prdy_clpr"])),
+    candles: candles.slice(-count),
+    rawKeys,
+    rawSample: rows[0] || null, // 필드명을 실측으로 확정하기 위한 원본 1행(debug action은 삭제됨)
+    msg: rows.length ? null : (j.msg1 || null),
+  };
 }
 
 // 국내 지수 일별 시세 (KOSPI 0001 / KOSDAQ 1001)
@@ -582,7 +633,15 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "6자리 종목코드를 입력하세요 (예: 005930)" });
 
     let out;
-    if (action === "daily") out = await getDaily(symbol, String(req.query.from || ""), String(req.query.to || ""));
+    if (action === "minute") {
+      const hhmmss = String(req.query.hour || "").replace(/\D/g, "");
+      out = await getMinutes(
+        symbol,
+        dt(String(req.query.date || ""), today()),
+        /^\d{6}$/.test(hhmmss) ? hhmmss : "093000",
+        Math.min(Math.max(parseInt(req.query.count, 10) || 31, 1), 120));
+    }
+    else if (action === "daily") out = await getDaily(symbol, String(req.query.from || ""), String(req.query.to || ""));
     else if (action === "finance") out = await getFinance(symbol);
     else if (action === "quote") out = await getPrice(symbol);   // 실시간용(가벼움)
     else out = await getFull(symbol);                            // 기본: 전체(현재가+이름+차트+재무)
