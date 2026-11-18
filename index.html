@@ -4039,7 +4039,9 @@ function btVerdicts(days,all){
   else{
     const d=g.mean-all.mean, w=Math.round(g.win*g.n/100);
     const base=`🟢 날 09:30에 사서 종가에 팔았다면 하루 평균 ${f(g.mean)}(${g.n}번 중 ${w}번 이익), 평소에는 ${f(all.mean)}였어요.`;
-    out.push(d>=BT_EDGE?{icon:"✅",title:"🟢 신호는 참고할 만해요",text:base+" 평소보다 더 벌었습니다."}
+    // 평소보다 덜 잃은 것만으로 "참고할 만해요"라고 쓰면 사도 된다는 뜻으로 읽힌다. 실제로 이익이었을 때만 ✅
+    out.push(d>=BT_EDGE&&g.mean>0?{icon:"✅",title:"🟢 신호는 참고할 만해요",text:base+" 평소보다 더 벌었습니다."}
+      :d>=BT_EDGE?{icon:"➖",title:"🟢 신호가 평소보다는 나았지만 그래도 손해였어요",text:base+" 이 기간엔 9:30에 사서 종가에 파는 방식 자체가 손해였습니다. 🟢만 보고 사면 덜 잃을 뿐 벌지는 못했습니다."}
       :d<=-BT_EDGE?{icon:"❌",title:"🟢 신호를 믿지 마세요",text:base+" 오히려 평소보다 못했습니다."}
       :{icon:"➖",title:"🟢 신호는 효과가 없었어요",text:base+" 평소와 별 차이가 없어서, 🟢만 보고 살 이유는 없습니다."});
   }
@@ -4049,22 +4051,27 @@ function btVerdicts(days,all){
   else{
     const d=r.mean-all.mean;
     const base=`🔴 날에 샀다면 하루 평균 ${f(r.mean)}, 평소에는 ${f(all.mean)}였어요.`;
+    // 세 갈래: 맞음 / 차이 없음 / 반대로 나옴(🔴 날이 오히려 좋았음). 두 갈래로만 쓰면 반대 결과가 "차이 없음"으로 숨는다
     out.push(d<=-BT_EDGE?{icon:"✅",title:"🔴 매수 금지가 맞았어요",text:base+" 🔴인 날은 사지 않는 게 나았습니다."}
-      :{icon:"➖",title:"🔴 매수 금지는 효과가 없었어요",text:base+" 🔴인 날도 평소보다 나쁘지 않았습니다."});
+      :d>=BT_EDGE?{icon:"❌",title:"🔴 매수 금지를 믿지 마세요",text:base+" 오히려 🔴인 날이 평소보다 나았습니다."}
+      :{icon:"➖",title:"🔴 매수 금지는 효과가 약했어요",text:base+" 평소와 별 차이가 없었습니다."});
   }
   // 1번 (큰 움직임 없음)
   const c=pick([1]);
   if(c&&c.n>=BT_MIN_N){
     const ok=c.move<=all.move*BT_CALM;
     out.push({icon:ok?"✅":"➖",title:ok?"⚪ '조용한 날'이 맞았어요":"⚪ '조용한 날'은 맞지 않았어요",
-      text:`⚪ 날 09:30 이후 평균 ${c.move.toFixed(2)}% 움직였고, 평소에는 ${all.move.toFixed(2)}%였어요.`+(ok?" 실제로 덜 움직였습니다.":" 평소만큼 움직였습니다.")});
+      text:`⚪ 날 09:30 이후 평균 ${c.move.toFixed(2)}% 움직였고, 평소에는 ${all.move.toFixed(2)}%였어요.`+(ok?" 실제로 덜 움직였습니다.":c.move>all.move?" 오히려 평소보다 더 움직였습니다.":" 평소와 비슷하게 움직였습니다.")});
   }
   // 7번 (장기 하락)
   const dn=btStats(days.filter(d=>d.down7===true)), up=btStats(days.filter(d=>d.down7===false));
   if(dn&&up&&dn.n>=BT_MIN_N&&up.n>=BT_MIN_N){
     const d=dn.mean-up.mean;
-    out.push({icon:d<=-BT_EDGE?"✅":"➖",title:d<=-BT_EDGE?"⚠ 7번(장기 하락 피하기)이 맞았어요":"⚠ 7번(장기 하락)은 차이가 없었어요",
-      text:`장기 하락 종목을 산 날은 하루 평균 ${f(dn.mean)}, 그렇지 않은 날은 ${f(up.mean)}였어요.`});
+    const base=`장기 하락 종목을 산 날은 하루 평균 ${f(dn.mean)}, 그렇지 않은 날은 ${f(up.mean)}였어요.`;
+    // 반대로 나와도 "무시하라"고 쓰지 않는다. 7번은 큰 손실을 피하려는 경고라 짧은 기간 한 번의 결과로 버리기엔 위험하다
+    out.push(d<=-BT_EDGE?{icon:"✅",title:"⚠ 7번(장기 하락 피하기)이 맞았어요",text:base+" 장기 하락 종목은 피하는 게 나았습니다."}
+      :d>=BT_EDGE?{icon:"❌",title:"⚠ 7번은 이 기간엔 반대로 나왔어요",text:base+" 오히려 장기 하락 종목을 산 날이 더 나았습니다. 다만 기간이 짧거나 종목이 비슷하면 우연일 수 있으니, 기간을 1년으로 늘리고 성격이 다른 종목을 더 넣어 다시 확인하세요."}
+      :{icon:"➖",title:"⚠ 7번(장기 하락)은 차이가 없었어요",text:base+" 피했을 때와 안 피했을 때 별 차이가 없었습니다."});
   }
   return out;
 }
