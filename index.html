@@ -461,11 +461,14 @@
           </select>
           <button onclick="runBacktest()">검증 실행</button>
           <button class="ghost" onclick="stopBacktest()">중지</button>
+          <select id="btSell" onchange="setBtSell(this.value)" title="09:30에 산 뒤 언제 팔았다고 볼지. 바꾸면 다시 받지 않고 바로 다시 계산합니다">
+            <option value="ret">그날 종가에 팔기</option><option value="retN">다음 날 종가에 팔기</option>
+          </select>
           <span id="btStat" class="hint" style="margin:0"></span>
         </div>
         <div id="btOut"></div>
         <div class="hint">
-          메모의 규칙이 실제로 돈이 됐는지 매기는 성적표입니다. 관심종목을 지난 기간 동안 날마다 판정해, 그날 09:30에 사서 종가에 팔았다면(수수료·세금 뺌) 어땠는지 모아 평소(모든 날)와 비교합니다.
+          메모의 규칙이 실제로 돈이 됐는지 매기는 성적표입니다. 관심종목을 지난 기간 동안 날마다 판정해, 그날 09:30에 사서 종가(또는 다음 날 종가)에 팔았다면(수수료·세금 뺌) 어땠는지 모아 평소(모든 날)와 비교합니다.
           맨 위 결론에서 "🟢 신호는 참고할 만해요"가 나오면 아침 판정의 🟢를 참고하고, "효과가 없었어요"면 🟢만 보고 사지 마세요. 한 달에 한 번쯤 다시 실행하면 됩니다.
           한 번 받은 날은 이 브라우저에 저장해 다시 실행하면 새 날짜만 받습니다. 종목 수 × 거래일만큼 조회해서(5종목 3개월 약 1분 30초) 시간이 걸립니다.
           09:30 가격에 정확히 샀다고 가정한 계산이며, 표본이 적으면(30건 미만) 우연이 섞입니다.
@@ -1511,6 +1514,10 @@ const HOLIDAYS={
   "2027-10-09":"한글날","2027-10-11":"대체공휴일",
   "2027-12-25":"성탄절","2027-12-27":"대체공휴일"
 };
+// 장이 늦게 여는 날(수능일 등): 정규장이 이 시간(시)만큼 늦게 열고 늦게 닫는다. 거래소가 해마다 따로 발표하므로 날짜를 직접 넣는다.
+// 2026-11-19 수능일 10:00~16:30 (거래소 11/5 발표, 머니투데이·경향신문 2026-11-19 확인). 보유종목 자동 갱신(marketState)이 쓴다.
+// 시초가 판정·과거 검증은 이 목록 없이 분봉에서 스스로 알아낸다(fetchOpenMinutes)
+const LATE_OPEN={"2026-11-19":1};
 // 요일 규칙에서 벗어난 날만 저장한다.
 // 값: 근무처 이름 | "off"(그냥 쉬는 날) | "leave"(연차)
 // 기본 휴무(화·일)는 지정이 없는 상태라 저장하지 않는다 — 연차와 구분하려는 목적
@@ -2880,19 +2887,20 @@ function marketState(){
   const kst=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
   const day=kst.getDay(), m=kst.getHours()*60+kst.getMinutes();
   const ymd=`${kst.getFullYear()}-${String(kst.getMonth()+1).padStart(2,"0")}-${String(kst.getDate()).padStart(2,"0")}`;
-  if(day===0||day===6)return{open:false,label:"주말 휴장"};
-  if(HOLIDAYS[ymd])return{open:false,label:`${HOLIDAYS[ymd]} 휴장`};
-  if(ymd.slice(5)==="12-31")return{open:false,label:"연말 휴장"};
-  if(m>=540&&m<=930)return{open:true,label:"🟢 장중"};
-  return{open:false,label:"🔴 장 마감"};
+  if(day===0||day===6)return{open:false,label:"주말 휴장",hrs:"09:00~15:30"};
+  if(HOLIDAYS[ymd])return{open:false,label:`${HOLIDAYS[ymd]} 휴장`,hrs:"09:00~15:30"};
+  if(ymd.slice(5)==="12-31")return{open:false,label:"연말 휴장",hrs:"09:00~15:30"};
+  const late=LATE_OPEN[ymd]||0, hrs=`${9+late}:00~${15+late}:30`;
+  if(m>=540+late*60&&m<=930+late*60)return{open:true,label:"🟢 장중",hrs};
+  return{open:false,label:"🔴 장 마감",hrs};
 }
 let prevMarketOpen=null;
 function tickClock(){
   const el=$("trClock"); if(!el)return;
   const kst=new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
   const p=n=>String(n).padStart(2,"0");
-  const open=marketState().open;
-  el.textContent=`${p(kst.getHours())}:${p(kst.getMinutes())}:${p(kst.getSeconds())} · ${marketState().label} (정규장 09:00~15:30)`;
+  const ms=marketState(), open=ms.open;
+  el.textContent=`${p(kst.getHours())}:${p(kst.getMinutes())}:${p(kst.getSeconds())} · ${ms.label} (정규장 ${ms.hrs})`;
   // 장 상태 전환 시 자동갱신 체크를 시장에 맞춘다(장중 자동 체크·장마감 자동 해제). 정지 구간의 수동 토글은 건드리지 않는다.
   if(prevMarketOpen!==null && open!==prevMarketOpen){
     const cb=$("trAuto");
@@ -3891,15 +3899,17 @@ function delWatch(i){
   saveWatch(); renderWatch();
 }
 // 1분봉(과거→최신)을 받아 판정 결과를 돌려준다. 09:30 봉이 아직 없으면 rule 없이 ready:false
+// 장 시작 시각은 첫 봉에서 알아낸다(수능일 등 늦게 연 날은 10:00 봉부터 온다 — fetchOpenMinutes)
 function opJudge(cs,flatPct){
-  const win=cs.filter(c=>c.time>="090000"&&c.time<="093000");
+  const h=cs.length?cs[0].time.slice(0,2):"09", t0=h+"0000", t1=h+"3000";
+  const win=cs.filter(c=>c.time>=t0&&c.time<=t1);
   if(!win.length)return null;
   const o=win[0].open, end=win.length-1, last=win[end];
   let hiI=0, loI=0;
   win.forEach((c,i)=>{if(c.high>win[hiI].high)hiI=i; if(c.low<win[loI].low)loI=i;});
   const hi=win[hiI], lo=win[loI];
   const r={o,hi:hi.high,hiT:hi.time,lo:lo.low,loT:lo.time,last:last.close,lastT:last.time,
-    range:(hi.high-lo.low)/o*100, ready:last.time>="093000"};
+    range:(hi.high-lo.low)/o*100, ready:last.time>=t1, late:h!=="09", t1};
   if(!r.ready)return r;
   if(r.range<flatPct){r.rule=1;return r;}
   // 방향은 30분 "중간에 꺾인 곳"으로 정한다. 고가·저가가 첫 봉(시초가)이나 마지막 봉(09:30)에 있으면 꺾인 곳이 아니다.
@@ -3932,18 +3942,30 @@ function opRowHtml(s,res){
   const head=`<span class="nm"><span class="hold-link" title="주식 분석에서 조회" onclick="analyzeHolding('${s.code}')">${esc(s.name||s.code)}</span> <small style="color:var(--muted)">${s.code}</small></span>`;
   if(res.err)return `<div class="mk-item">${head}${tag7}<span class="why"><span style="color:var(--danger)">${esc(res.err)}</span>${t7}</span></div>`;
   const r=res.r;
-  if(!r)return `<div class="mk-item">${head}${tag7}<span class="why">그날 09:00~09:30 분봉이 없습니다(휴장일이거나 장 시작 전).${t7}</span></div>`;
+  if(!r)return `<div class="mk-item">${head}${tag7}<span class="why">그날 첫 30분 분봉이 없습니다(휴장일이거나 장 시작 전).${t7}</span></div>`;
   const hm=t=>t.slice(0,2)+":"+t.slice(2,4);
+  const lateTag=r.late?`<span class="mk-tag" title="수능일 등 장이 늦게 연 날이라 첫 30분(${hm(r.t1.slice(0,2)+"00")}~${hm(r.t1)})으로 판정합니다">${+r.t1.slice(0,2)}시 개장</span>`:"";
   const pct=(r.last-r.o)/r.o*100;
   const facts=`시초가 ${won(r.o)} · 고가 ${won(r.hi)}(${hm(r.hiT)}) · 저가 ${won(r.lo)}(${hm(r.loT)}) · `+
     `${hm(r.lastT)} ${won(r.last)} <span class="${pct>=0?"up":"down"}">(${pct>=0?"+":""}${pct.toFixed(2)}%)</span> · 30분 폭 ${r.range.toFixed(2)}%`;
-  if(!r.ready)return `<div class="mk-item">${head}<span class="mk-tag">대기</span>${tag7}
-    <span class="dd">09:30 이후 판정</span><span class="why">${facts}${t7}</span></div>`;
+  if(!r.ready)return `<div class="mk-item">${head}<span class="mk-tag">대기</span>${lateTag}${tag7}
+    <span class="dd">${hm(r.t1)} 이후 판정</span><span class="why">${facts}${t7}</span></div>`;
   const rule=OP_RULES[r.rule], col=OP_COLOR[rule.sig];
   return `<div class="mk-item" style="border-color:${col}">${head}
-    <span class="mk-tag" style="color:${col};background:transparent;border:1px solid ${col}">${rule.label}</span>${tag7}
+    <span class="mk-tag" style="color:${col};background:transparent;border:1px solid ${col}">${rule.label}</span>${lateTag}${tag7}
     <span class="dd" style="color:${col}">규칙 ${r.rule}</span>
     <span class="why">${facts}<br>${rule.txt}${t7}</span></div>`;
+}
+// 그날 첫 30분 분봉. 09:30 기준이 비면(수능일 등 늦게 연 날) 10:30 기준으로 한 번 더 받는다.
+// 날짜 목록 없이 분봉으로 알아내므로 과거 수능일도 자동으로 맞는다. {error} 또는 {candles}
+async function fetchOpenMinutes(code,date){
+  const get=h=>kisFetch(`?action=minute&symbol=${code}&date=${date}&hour=${h}&count=31`);
+  const j=await get("093000");
+  if(j.error||(j.candles||[]).length)return j;
+  await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
+  const k=await get("103000");
+  // 10:00 봉이 있어야 늦게 연 날로 본다. 거래가 드문 종목이 그냥 10시 넘어 처음 체결된 날을 늦은 개장으로 착각하지 않게
+  return !k.error&&(k.candles||[]).length&&k.candles[0].time==="100000"?k:j;
 }
 async function judgeOpen(){
   if(opBusy)return;
@@ -3974,7 +3996,7 @@ async function judgeOpen(){
           }
         }
         await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
-        const j=await kisFetch(`?action=minute&symbol=${s.code}&date=${date}&hour=093000&count=31`);
+        const j=await fetchOpenMinutes(s.code,date);
         res=j.error?{err:j.error,trend}:{r:opJudge(j.candles||[],opFlatPct),trend};
       }catch(e){res={err:"불러오기 실패: "+e.message,trend};}
       rows[i]=opRowHtml(s,res);
@@ -3992,7 +4014,9 @@ renderWatch();
      다시 실행하면 새 날짜만 받는다. 분봉을 저장하고 판정은 매번 하므로 "변동 없음" 기준을 바꿔도 캐시가 틀어지지 않는다
    - 오늘은 장이 안 끝났을 수 있어 넣지 않는다
    - 7번(장기 하락)은 그날 이전 종가까지만으로 계산(미래 정보 차단), 가격은 09:30 가격
-   - 수익률 = (종가 − 매도 비용 − (09:30가 + 매수 비용)) ÷ (09:30가 + 매수 비용). 비용은 tradeCost(기본 수수료, ETF 거래세 면제) */
+   - 수익률 = (종가 − 매도 비용 − (09:30가 + 매수 비용)) ÷ (09:30가 + 매수 비용). 비용은 tradeCost(기본 수수료, ETF 거래세 면제)
+   - 매도 시점은 그날 종가(ret)와 다음 거래일 종가(retN) 두 가지를 함께 계산해 두고 btSell 선택으로 바꿔 본다(2026-11-19 사용자 "다음 날 비교").
+     메모가 하루 넘게 들고 가는 것을 뜻했을 수 있어서다. 다음 거래일이 오늘이면 종가가 확정 전이라 retN은 비운다 */
 const BT_MIN_N=30; // 이보다 적은 칸은 "표본 적음"
 // 쉬운 결론 기준(2026-11-19 사용자 "쉬운 결론 진행"). 왕복 비용(약 0.23%)을 이미 뺀 수익률끼리 비교한다
 const BT_EDGE=0.3;      // 모든 날 평균과 하루 평균 이만큼(%p) 이상 차이 나야 "효과 있음"
@@ -4000,17 +4024,22 @@ const BT_CALM=0.8;      // 1번: 이후 움직임이 모든 날의 이 비율 �
 // 표의 구분 칸에 결론(🔴/🟢)만이 아니라 30분 동안 일어난 일을 함께 보여준다
 const OP_DESC={1:"30분 동안 거의 안 움직임",2:"올랐다 내려와 시초가 아래로",3:"올랐다 내려왔지만 시초가 위에서 버팀",4:"내렸다 반등했지만 시초가 못 넘음",5:"내렸다 반등해 시초가를 넘음"};
 let btStop=false, btBusy=false;
+let btKey="ret", btLast=null; // 보고 있는 매도 시점, 마지막 실행 결과(선택만 바꿀 때 다시 그리기용)
+const BT_SELL={ret:"그날 종가",retN:"다음 날 종가"};
+function setBtSell(v){btKey=v; if(btLast)renderBacktest(btLast.days,btLast.info);}
 function stopBacktest(){btStop=true;}
 // 하루치: 분봉 + 그날 종가 + 그 전날까지 종가 → 판정·수익률. 판정 불가면 null
-function btDay(cs,close,prevCloses,name){
+function btDay(cs,close,nextClose,prevCloses,name){
   const r=opJudge(cs,opFlatPct);
   if(!r||!r.ready||!(r.last>0)||!(close>0))return null;
   const buy=r.last+tradeCost(r.last,false,"",name);
-  const sell=close-tradeCost(close,true,"",name);
+  const ret=c=>c>0?(c-tradeCost(c,true,"",name)-buy)/buy*100:null;
   const t=longDownTrend(prevCloses,r.last);
-  return {rule:r.rule, ret:(sell-buy)/buy*100, move:Math.abs(close-r.last)/r.last*100, down7:t?t.down:null};
+  return {rule:r.rule, ret:ret(close), retN:ret(nextClose), move:Math.abs(close-r.last)/r.last*100, down7:t?t.down:null};
 }
-function btStats(list){
+// 보고 있는 매도 시점(btKey)의 수익률로 집계. 다음 날 종가가 없는 마지막 날은 빠진다
+function btStats(src){
+  const list=src.filter(d=>d[btKey]!=null).map(d=>({...d,ret:d[btKey]}));
   if(!list.length)return null;
   const rs=list.map(d=>d.ret).sort((a,b)=>a-b), n=rs.length;
   const mid=n%2?rs[(n-1)/2]:(rs[n/2-1]+rs[n/2])/2;
@@ -4038,10 +4067,10 @@ function btVerdicts(days,all){
   if(!g||g.n<BT_MIN_N)out.push({icon:"⏳",title:"🟢 신호(오를 가능성)",text:few(g,"🟢가 나온")});
   else{
     const d=g.mean-all.mean, w=Math.round(g.win*g.n/100);
-    const base=`🟢 날 09:30에 사서 종가에 팔았다면 하루 평균 ${f(g.mean)}(${g.n}번 중 ${w}번 이익), 평소에는 ${f(all.mean)}였어요.`;
+    const base=`🟢 날 09:30에 사서 ${BT_SELL[btKey]}에 팔았다면 하루 평균 ${f(g.mean)}(${g.n}번 중 ${w}번 이익), 평소에는 ${f(all.mean)}였어요.`;
     // 평소보다 덜 잃은 것만으로 "참고할 만해요"라고 쓰면 사도 된다는 뜻으로 읽힌다. 실제로 이익이었을 때만 ✅
     out.push(d>=BT_EDGE&&g.mean>0?{icon:"✅",title:"🟢 신호는 참고할 만해요",text:base+" 평소보다 더 벌었습니다."}
-      :d>=BT_EDGE?{icon:"➖",title:"🟢 신호가 평소보다는 나았지만 그래도 손해였어요",text:base+" 이 기간엔 9:30에 사서 종가에 파는 방식 자체가 손해였습니다. 🟢만 보고 사면 덜 잃을 뿐 벌지는 못했습니다."}
+      :d>=BT_EDGE?{icon:"➖",title:"🟢 신호가 평소보다는 나았지만 그래도 손해였어요",text:base+" 이 기간엔 9:30에 사서 ${BT_SELL[btKey]}에 파는 방식 자체가 손해였습니다. 🟢만 보고 사면 덜 잃을 뿐 벌지는 못했습니다."}
       :d<=-BT_EDGE?{icon:"❌",title:"🟢 신호를 믿지 마세요",text:base+" 오히려 평소보다 못했습니다."}
       :{icon:"➖",title:"🟢 신호는 효과가 없었어요",text:base+" 평소와 별 차이가 없어서, 🟢만 보고 살 이유는 없습니다."});
   }
@@ -4080,7 +4109,7 @@ function renderBacktest(days,info){
   if(!all){$("btOut").innerHTML='<div class="hint">판정할 수 있는 날이 없습니다.</div>';return;}
   const by=k=>btStats(days.filter(d=>d.rule===k));
   const head=`<tr style="color:var(--muted);text-align:right"><th style="padding:6px;text-align:left">구분</th><th style="padding:6px">건수</th>
-    <th style="padding:6px" title="09:30 매수 → 종가 매도, 비용 차감">평균 수익률</th><th style="padding:6px">중앙값</th>
+    <th style="padding:6px" title="09:30 매수 → ${BT_SELL[btKey]} 매도, 비용 차감">평균 수익률</th><th style="padding:6px">중앙값</th>
     <th style="padding:6px" title="수익이 0보다 큰 날의 비율">승률</th><th style="padding:6px" title="09:30 가격에서 종가까지 움직인 크기(절댓값) 평균. 1번은 이 값이 작아야 맞음">이후 움직임</th>
     <th style="padding:6px" title="이 구분의 평균 수익률 − 모든 날 평균">모든 날 대비</th></tr>`;
   const rules=[1,2,3,4,5].map(k=>btRowHtml(`${k}번 ${OP_RULES[k].label}<br><small style="color:var(--muted)">${OP_DESC[k]}</small>`,by(k),all,k===1?"움직임을 보세요":""));
@@ -4088,9 +4117,10 @@ function renderBacktest(days,info){
   const tbl=(rows)=>`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px"><thead>${head}</thead><tbody>${rows.join("")}</tbody></table></div>`;
   const vs=btVerdicts(days,all);
   $("btOut").innerHTML=`<div class="easy" style="margin-top:8px">
-      <div class="easy-title">📋 결론 — 메모의 규칙이 내 관심종목에서 맞았나</div>
+      <div class="easy-title">📋 결론 — 메모의 규칙이 내 관심종목에서 맞았나 <small style="color:var(--muted)">(${BT_SELL[btKey]}에 팔았을 때)</small></div>
       ${vs.map(v=>`<div class="easy-row"><div class="easy-k" style="min-width:auto;flex-direction:row;gap:6px">${v.icon} ${v.title}</div></div>
         <div class="easy-n" style="margin:-4px 0 6px 24px">${v.text}</div>`).join("")}
+      ${btSellCompare(days)}
       <div class="easy-n" style="margin-top:8px;color:#f5a623">※ 과거 결과이고 앞으로도 같다는 보장은 없습니다. 사고팔지는 직접 정하세요.</div>
     </div>
     <details class="fd-sec"><summary>자세히 보기 (숫자 표)</summary>
@@ -4099,6 +4129,19 @@ function renderBacktest(days,info){
     `<div class="exp-label" style="margin-top:14px">7번 장기 하락 추세</div>`+
     tbl([btRowHtml("⚠ 7번 걸린 날",d7,all), btRowHtml("7번 안 걸린 날",n7,all)])+
     `</details>`;
+}
+// 그날 팔기 vs 다음 날 팔기를 한눈에. 선택과 상관없이 두 시점을 나란히 보여준다
+function btSellCompare(days){
+  const keep=btKey, f=v=>v==null?"-":`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${v.toFixed(2)}%</span>`;
+  const rows=[["🟢 날",d=>d.rule===3||d.rule===5],["🔴 날",d=>d.rule===2||d.rule===4],["모든 날",()=>true]].map(([lb,fn])=>{
+    const sub=days.filter(fn), m={};
+    for(const k of ["ret","retN"]){btKey=k; const st=btStats(sub); m[k]=st?st.mean:null;}
+    return `<tr><td style="padding:4px 6px">${lb}</td><td style="padding:4px 6px;text-align:right">${f(m.ret)}</td><td style="padding:4px 6px;text-align:right">${f(m.retN)}</td></tr>`;
+  });
+  btKey=keep;
+  return `<div class="easy-n" style="margin-top:8px">언제 팔았느냐에 따른 한 번 거래 평균 (수수료·세금 뺌)</div>
+    <table style="border-collapse:collapse;font-size:13px;margin:2px 0 0 24px"><thead><tr style="color:var(--muted)"><th></th>
+    <th style="padding:4px 6px">그날 종가</th><th style="padding:4px 6px">다음 날 종가</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 async function runBacktest(){
   if(btBusy)return;
@@ -4128,19 +4171,21 @@ async function runBacktest(){
         if(!mins||!mins.length){
           await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
           try{
-            const j=await kisFetch(`?action=minute&symbol=${s.code}&date=${date}&hour=093000&count=31`);
+            const j=await fetchOpenMinutes(s.code,date);
             if(j.error){failed++;continue;}
             mins=j.candles||[];
             fetched++;
             if(mins.length){try{await idbSet(key,mins);}catch(e){}} // 봉이 있는 날만 저장. 저장 실패해도 계산은 계속
           }catch(e){failed++;continue;}
         }
-        const d=btDay(mins,cs[i].close,closes.slice(0,i),s.name);
+        const nx=cs[i+1]&&cs[i+1].date<today?cs[i+1].close:null; // 다음 거래일이 오늘이면 종가 확정 전
+        const d=btDay(mins,cs[i].close,nx,closes.slice(0,i),s.name);
         if(d)days.push(d);
       }
     }
     const info=`관심종목 ${list.length}개 · ${start.slice(0,4)}-${start.slice(4,6)}-${start.slice(6)}부터 · 판정된 날 ${days.length}건`+
       `${failed?` · 받지 못한 날 ${failed}건`:""}${btStop?" · 중지됨(여기까지 결과)":""} · 변동 없음 기준 ${opFlatPct}%`;
+    btLast={days,info};
     renderBacktest(days,info);
     $("btStat").textContent=btStop?"중지됨":"완료";
   }finally{btBusy=false;}
