@@ -121,7 +121,8 @@ async function getDaily(symbol, from, to) {
     if (!name) name = (j.output1 && (j.output1.hts_kor_isnm || j.output1.prdt_name)) || null;
     (j.output2 || []).forEach((x) => {
       if (x.stck_bsop_date && x.stck_clpr)
-        map[x.stck_bsop_date] = { date: x.stck_bsop_date, close: num(x.stck_clpr), vol: num(x.acml_vol) };
+        map[x.stck_bsop_date] = { date: x.stck_bsop_date, close: num(x.stck_clpr), vol: num(x.acml_vol),
+          open: num(x.stck_oprc), low: num(x.stck_lwpr) }; // open·low는 과거 검증의 손절 계산이 쓴다
     });
   }
   const candles = Object.keys(map).sort().map((k) => map[k]); // 과거→최근

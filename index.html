@@ -463,6 +463,7 @@
           <button class="ghost" onclick="stopBacktest()">중지</button>
           <select id="btSell" onchange="setBtSell(this.value)" title="09:30에 산 뒤 언제 팔았다고 볼지. 바꾸면 다시 받지 않고 바로 다시 계산합니다">
             <option value="ret">그날 종가에 팔기</option><option value="retN">다음 날 종가에 팔기</option>
+            <option value="retS">그날 종가 (시초가 손절)</option>
           </select>
           <span id="btStat" class="hint" style="margin:0"></span>
         </div>
@@ -4016,7 +4017,13 @@ renderWatch();
    - 7번(장기 하락)은 그날 이전 종가까지만으로 계산(미래 정보 차단), 가격은 09:30 가격
    - 수익률 = (종가 − 매도 비용 − (09:30가 + 매수 비용)) ÷ (09:30가 + 매수 비용). 비용은 tradeCost(기본 수수료, ETF 거래세 면제)
    - 매도 시점은 그날 종가(ret)와 다음 거래일 종가(retN) 두 가지를 함께 계산해 두고 btSell 선택으로 바꿔 본다(2026-11-19 사용자 "다음 날 비교").
-     메모가 하루 넘게 들고 가는 것을 뜻했을 수 있어서다. 다음 거래일이 오늘이면 종가가 확정 전이라 retN은 비운다 */
+     메모가 하루 넘게 들고 가는 것을 뜻했을 수 있어서다. 다음 거래일이 오늘이면 종가가 확정 전이라 retN은 비운다
+   - 시초가 손절(retS, 2026-11-23 사용자 "손절 검증 진행"): 09:30 가격이 시초가 이상인 날만, 09:30 뒤 1분봉 종가가 처음
+     시초가 아래로 가면 그 봉 종가에 판다(판정과 같은 종가 기준). 안 걸리면 그날 종가. 그날 안에서만 본다.
+     일봉 저가 ≥ 시초가면 걸릴 수 없어 분봉을 받지 않고, 받을 때도 2시간씩 받다 걸리면 멈춘다(btStopScan).
+     손절 결과(가격 또는 없음)를 bts1_<코드>_<날짜>로 저장한다. 손절 기준을 바꾸면 접두사를 바꿀 것
+   - 일봉은 수정주가, 분봉은 원래 가격이라 액면분할·병합 전 날은 둘이 어긋난다. 09:30 가격과 그날 종가가
+     30%(가격 제한폭) 넘게 차이 나면 그날은 뺀다(BT_ADJ) */
 const BT_MIN_N=30; // 이보다 적은 칸은 "표본 적음"
 // 쉬운 결론 기준(2026-11-19 사용자 "쉬운 결론 진행"). 왕복 비용(약 0.23%)을 이미 뺀 수익률끼리 비교한다
 const BT_EDGE=0.3;      // 모든 날 평균과 하루 평균 이만큼(%p) 이상 차이 나야 "효과 있음"
@@ -4025,17 +4032,37 @@ const BT_CALM=0.8;      // 1번: 이후 움직임이 모든 날의 이 비율 �
 const OP_DESC={1:"30분 동안 거의 안 움직임",2:"올랐다 내려와 시초가 아래로",3:"올랐다 내려왔지만 시초가 위에서 버팀",4:"내렸다 반등했지만 시초가 못 넘음",5:"내렸다 반등해 시초가를 넘음"};
 let btStop=false, btBusy=false;
 let btKey="ret", btLast=null; // 보고 있는 매도 시점, 마지막 실행 결과(선택만 바꿀 때 다시 그리기용)
-const BT_SELL={ret:"그날 종가",retN:"다음 날 종가"};
+const BT_SELL={ret:"그날 종가",retN:"다음 날 종가",retS:"그날 종가(시초가 손절)"};
+const BT_ADJ=0.3; // 09:30 가격과 일봉 종가가 이보다 크게 다르면 수정주가 어긋남으로 보고 뺀다
 function setBtSell(v){btKey=v; if(btLast)renderBacktest(btLast.days,btLast.info);}
 function stopBacktest(){btStop=true;}
 // 하루치: 분봉 + 그날 종가 + 그 전날까지 종가 → 판정·수익률. 판정 불가면 null
 function btDay(cs,close,nextClose,prevCloses,name){
   const r=opJudge(cs,opFlatPct);
   if(!r||!r.ready||!(r.last>0)||!(close>0))return null;
+  if(Math.abs(close/r.last-1)>BT_ADJ)return null; // 수정주가 어긋남(액면분할 등)
   const buy=r.last+tradeCost(r.last,false,"",name);
   const ret=c=>c>0?(c-tradeCost(c,true,"",name)-buy)/buy*100:null;
   const t=longDownTrend(prevCloses,r.last);
-  return {rule:r.rule, ret:ret(close), retN:ret(nextClose), move:Math.abs(close-r.last)/r.last*100, down7:t?t.down:null};
+  return {rule:r.rule, ret:ret(close), retN:nextClose>0&&Math.abs(nextClose/close-1)<=BT_ADJ?ret(nextClose):null, retS:null, move:Math.abs(close-r.last)/r.last*100, down7:t?t.down:null,
+    o:r.o, last:r.last, t1:r.t1, sellRet:ret}; // o·last·t1·sellRet은 손절 계산(btStopScan) 뒤 retS를 채울 때 쓴다
+}
+// 09:30 뒤 1분봉 종가가 처음 시초가(o) 아래로 간 봉의 종가. 없으면 0, 받지 못하면 null.
+// 2시간씩(120봉) 받다가 걸리면 멈춘다. 늦게 연 날은 t1이 10:30이라 구간도 1시간 늦춘다
+async function btStopScan(code,date,o,t1){
+  const key=`bts1_${code}_${date}`;
+  try{const v=await idbGet(key); if(v&&typeof v.p==="number")return v.p;}catch(e){}
+  const late=+t1.slice(0,2)-9;
+  for(const hh of [11,13,15]){
+    const end=String(hh+late).padStart(2,"0")+"3000";
+    await new Promise(ok=>setTimeout(ok,200)); // KIS 초당 호출 제한
+    const j=await kisFetch(`?action=minute&symbol=${code}&date=${date}&hour=${end}&count=120`);
+    if(j.error)return null;
+    const hit=(j.candles||[]).find(c=>c.time>t1&&c.time<=end&&c.close<o);
+    if(hit){try{await idbSet(key,{p:hit.close});}catch(e){} return hit.close;}
+  }
+  try{await idbSet(key,{p:0});}catch(e){}
+  return 0;
 }
 // 보고 있는 매도 시점(btKey)의 수익률로 집계. 다음 날 종가가 없는 마지막 날은 빠진다
 function btStats(src){
@@ -4074,9 +4101,10 @@ function btVerdicts(days,all){
       :d<=-BT_EDGE?{icon:"❌",title:"🟢 신호를 믿지 마세요",text:base+" 오히려 평소보다 못했습니다."}
       :{icon:"➖",title:"🟢 신호는 효과가 없었어요",text:base+" 평소와 별 차이가 없어서, 🟢만 보고 살 이유는 없습니다."});
   }
-  // 🔴 신호 (2·4번)
+  // 🔴 신호 (2·4번). 손절 보기는 09:30가 시초가 이상인 날만이라 🔴(시초가 아래) 날이 없다
   const r=pick([2,4]);
-  if(!r||r.n<BT_MIN_N)out.push({icon:"⏳",title:"🔴 신호(매수 금지)",text:few(r,"🔴가 나온")});
+  if(btKey==="retS")out.push({icon:"ℹ",title:"🔴 신호는 손절 보기에서 빠져요",text:"🔴는 09:30 가격이 시초가 아래인 날이라 사자마자 손절이 걸립니다. 그래서 이 보기에서는 계산하지 않습니다."});
+  else if(!r||r.n<BT_MIN_N)out.push({icon:"⏳",title:"🔴 신호(매수 금지)",text:few(r,"🔴가 나온")});
   else{
     const d=r.mean-all.mean;
     const base=`🔴 날에 샀다면 하루 평균 ${f(r.mean)}, 평소에는 ${f(all.mean)}였어요.`;
@@ -4133,15 +4161,17 @@ function renderBacktest(days,info){
 // 그날 팔기 vs 다음 날 팔기를 한눈에. 선택과 상관없이 두 시점을 나란히 보여준다
 function btSellCompare(days){
   const keep=btKey, f=v=>v==null?"-":`<span class="${v>=0?"up":"down"}">${v>=0?"+":""}${v.toFixed(2)}%</span>`;
+  const K=["ret","retN","retS"], td=v=>`<td style="padding:4px 6px;text-align:right">${f(v)}</td>`;
   const rows=[["🟢 날",d=>d.rule===3||d.rule===5],["🔴 날",d=>d.rule===2||d.rule===4],["모든 날",()=>true]].map(([lb,fn])=>{
     const sub=days.filter(fn), m={};
-    for(const k of ["ret","retN"]){btKey=k; const st=btStats(sub); m[k]=st?st.mean:null;}
-    return `<tr><td style="padding:4px 6px">${lb}</td><td style="padding:4px 6px;text-align:right">${f(m.ret)}</td><td style="padding:4px 6px;text-align:right">${f(m.retN)}</td></tr>`;
+    for(const k of K){btKey=k; const st=btStats(sub); m[k]=st?st.mean:null;}
+    return `<tr><td style="padding:4px 6px">${lb}</td>${K.map(k=>td(m[k])).join("")}</tr>`;
   });
   btKey=keep;
   return `<div class="easy-n" style="margin-top:8px">언제 팔았느냐에 따른 한 번 거래 평균 (수수료·세금 뺌)</div>
     <table style="border-collapse:collapse;font-size:13px;margin:2px 0 0 24px"><thead><tr style="color:var(--muted)"><th></th>
-    <th style="padding:4px 6px">그날 종가</th><th style="padding:4px 6px">다음 날 종가</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+    <th style="padding:4px 6px">그날 종가</th><th style="padding:4px 6px">다음 날 종가</th><th style="padding:4px 6px">시초가 손절</th></tr></thead><tbody>${rows.join("")}</tbody></table>
+    <div class="easy-n" style="margin:2px 0 0 24px;color:var(--muted)">시초가 손절 열의 "모든 날"은 09:30 가격이 시초가 이상인 날만입니다(아래면 사자마자 손절이라 뺌).</div>`;
 }
 async function runBacktest(){
   if(btBusy)return;
@@ -4153,7 +4183,7 @@ async function runBacktest(){
   const start=ymd(new Date(now.getFullYear(),now.getMonth()-months,now.getDate()));
   const from=ymd(new Date(now.getFullYear(),now.getMonth()-months,now.getDate()-183)); // 7번용 60일선+20거래일 여유
   const list=watchStocks.slice();
-  const days=[]; let fetched=0, failed=0;
+  const days=[]; let fetched=0, failed=0, stopHit=0, stopFail=0;
   try{
     for(let si=0;si<list.length&&!btStop;si++){
       const s=list[si];
@@ -4180,11 +4210,23 @@ async function runBacktest(){
         }
         const nx=cs[i+1]&&cs[i+1].date<today?cs[i+1].close:null; // 다음 거래일이 오늘이면 종가 확정 전
         const d=btDay(mins,cs[i].close,nx,closes.slice(0,i),s.name);
-        if(d)days.push(d);
+        if(!d)continue;
+        // 시초가 손절: 09:30가 시초가 이상인 날만. 일봉 저가가 시초가 이상이면 종가도 시초가 아래로 갈 수 없어 분봉을 받지 않는다
+        if(d.last>=d.o){
+          if(cs[i].low>=d.o)d.retS=d.ret;
+          else{
+            $("btStat").textContent=`종목 ${si+1}/${list.length} · ${k+1}/${idx.length}일 · 손절 확인 중 · 새로 받음 ${fetched}`;
+            const p=await btStopScan(s.code,date,d.o,d.t1);
+            if(p===null)stopFail++;
+            else{ if(p>0)stopHit++; d.retS=p>0?d.sellRet(p):d.ret; }
+          }
+        }
+        delete d.sellRet;
+        days.push(d);
       }
     }
     const info=`관심종목 ${list.length}개 · ${start.slice(0,4)}-${start.slice(4,6)}-${start.slice(6)}부터 · 판정된 날 ${days.length}건`+
-      `${failed?` · 받지 못한 날 ${failed}건`:""}${btStop?" · 중지됨(여기까지 결과)":""} · 변동 없음 기준 ${opFlatPct}%`;
+      `${failed?` · 받지 못한 날 ${failed}건`:""} · 시초가 손절 걸린 날 ${stopHit}건${stopFail?` · 손절 확인 못 한 날 ${stopFail}건`:""}${btStop?" · 중지됨(여기까지 결과)":""} · 변동 없음 기준 ${opFlatPct}%`;
     btLast={days,info};
     renderBacktest(days,info);
     $("btStat").textContent=btStop?"중지됨":"완료";
